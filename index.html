@@ -32,31 +32,26 @@
     let heartParticles = [];
     let lizard;
 
-    // Physarum-inspired trail map grid for organic mold movement & growth
-    const TRAIL_SCALE = 4;
-    let trailMap = [];
-    let trailCols, trailRows;
-
     function setup() {
       let canvas = createCanvas(windowWidth, windowHeight);
       canvas.parent('canvas-container');
       angleMode(DEGREES);
 
-      trailCols = floor(width / TRAIL_SCALE);
-      trailRows = floor(height / TRAIL_SCALE);
-      initTrailMap();
-
       // Instantiate Lizard in the center
       lizard = new Lizard(width / 2, height / 2);
 
-      // Initial batch of mold agents at edges
-      for (let i = 0; i < 4000; i++) {
-        spawnEdgeMold();
-      }
+      // Create initial border coating of mold along the inner glass boundary
+      initEdgeMoldBorder();
     }
 
-    function initTrailMap() {
-      trailMap = new Float32Array(trailCols * trailRows);
+    function initEdgeMoldBorder() {
+      let radius = min(width, height) * 0.44;
+      // Spawn points all around the circular perimeter edge to cover it solidly
+      for (let angle = 0; angle < 360; angle += 1.5) {
+        let x = width / 2 + cos(angle) * radius;
+        let y = height / 2 + sin(angle) * radius;
+        moldParticles.push(new MoldNode(x, y, true)); // Edge anchor
+      }
     }
 
     function draw() {
@@ -73,30 +68,33 @@
       ellipse(width / 2, height / 2, min(width, height) * 0.9);
       pop();
 
-      // Evaporate trail map
-      for (let i = 0; i < trailMap.length; i++) {
-        trailMap[i] *= 0.95;
+      // 2. High spawn rate & Strand growth behavior toward center
+      // Continuously spawn new edge particles and push branching strands inward
+      if (frameCount % 1 === 0 && moldParticles.length < 5000) {
+        // Pick an existing tip or edge particle to branch from
+        let parentIdx = floor(random(moldParticles.length));
+        let parent = moldParticles[parentIdx];
+        if (parent) {
+          let centerAngle = atan2(height / 2 - parent.y, width / 2 - parent.x);
+          // Stack tightly in strands pointing toward center
+          let angle = centerAngle + random(-15, 15);
+          let nx = parent.x + cos(angle) * 4;
+          let ny = parent.y + sin(angle) * 4;
+          
+          let dCenter = dist(nx, ny, width / 2, height / 2);
+          // Allow strands to grow inward toward center while staying attached
+          if (dCenter > min(width, height) * 0.18 && dCenter < min(width, height) * 0.45) {
+            moldParticles.push(new MoldNode(nx, ny, false));
+          }
+        }
       }
 
-      // Continuous slow spawn of mold agents on edges
-      if (frameCount % 2 === 0 && moldParticles.length < 5500) {
-        spawnEdgeMold();
-      }
-
-      // 2. Update & Draw Layer 2: Mold Growth (Physarum active agents creeping toward center)
+      // Update & Draw Layer 2: Mold strands
       noStroke();
       fill(100, 190, 80, 220);
-      for (let i = moldParticles.length - 1; i >= 0; i--) {
+      for (let i = 0; i < moldParticles.length; i++) {
         let p = moldParticles[i];
-        p.update();
-        p.display();
-
-        // Deposit on trail grid
-        let tx = floor(p.x / TRAIL_SCALE);
-        let ty = floor(p.y / TRAIL_SCALE);
-        if (tx >= 0 && tx < trailCols && ty >= 0 && ty < trailRows) {
-          trailMap[tx + ty * trailCols] = min(1.0, trailMap[tx + ty * trailCols] + 0.3);
-        }
+        circle(p.x, p.y, 3.5);
       }
 
       // Draw Pink Dot Snacks spawned by user tapping
@@ -123,80 +121,12 @@
       }
     }
 
-    function spawnEdgeMold() {
-      let side = floor(random(4));
-      let x, y, angle;
-      let margin = min(width, height) * 0.44;
-      
-      if (side === 0) { x = random(width * 0.1, width * 0.9); y = height / 2 - margin; }
-      else if (side === 1) { x = width / 2 + margin; y = random(height * 0.1, height * 0.9); }
-      else if (side === 2) { x = random(width * 0.1, width * 0.9); y = height / 2 + margin; }
-      else { x = width / 2 - margin; y = random(height * 0.1, height * 0.9); }
-      
-      // Point inward toward center with slight variation
-      let centerAngle = atan2(height / 2 - y, width / 2 - x);
-      angle = centerAngle + random(-30, 30);
-      moldParticles.push(new MoldAgent(x, y, angle));
-    }
-
-    // Mold Agent Class (Physarum behavior: senses trails and crawls toward center)
-    class MoldAgent {
-      constructor(x, y, angle) {
+    class MoldNode {
+      constructor(x, y, isEdge) {
         this.x = x;
         this.y = y;
-        this.angle = angle;
-        this.sensorAngle = 45;
-        this.sensorDist = 12;
-        this.stepSize = 1.0;
+        this.isEdge = isEdge;
       }
-
-      update() {
-        let centerHeading = atan2(height / 2 - this.y, width / 2 - this.x);
-
-        let fwdX = this.x + cos(this.angle) * this.sensorDist;
-        let fwdY = this.y + sin(this.angle) * this.sensorDist;
-        let leftX = this.x + cos(this.angle - this.sensorAngle) * this.sensorDist;
-        let leftY = this.y + sin(this.angle - this.sensorAngle) * this.sensorDist;
-        let rightX = this.x + cos(this.angle + this.sensorAngle) * this.sensorDist;
-        let rightY = this.y + sin(this.angle + this.sensorAngle) * this.sensorDist;
-
-        let fwdVal = getTrailValue(fwdX, fwdY);
-        let leftVal = getTrailValue(leftX, leftY);
-        let rightVal = getTrailValue(rightX, rightY);
-
-        if (fwdVal > leftVal && fwdVal > rightVal) {
-          // Keep straight
-        } else if (leftVal > rightVal) {
-          this.angle -= 10;
-        } else if (rightVal > leftVal) {
-          this.angle += 10;
-        } else {
-          this.angle += (centerHeading - this.angle) * 0.08 + random(-10, 10);
-        }
-
-        this.x += cos(this.angle) * this.stepSize;
-        this.y += sin(this.angle) * this.stepSize;
-
-        // Keep within terrarium glass boundary
-        let dCenter = dist(this.x, this.y, width / 2, height / 2);
-        let maxRadius = min(width, height) * 0.44;
-        if (dCenter > maxRadius) {
-          this.angle = centerHeading + random(-20, 20);
-        }
-      }
-
-      display() {
-        circle(this.x, this.y, 3);
-      }
-    }
-
-    function getTrailValue(x, y) {
-      let tx = floor(x / TRAIL_SCALE);
-      let ty = floor(y / TRAIL_SCALE);
-      if (tx >= 0 && tx < trailCols && ty >= 0 && ty < trailRows) {
-        return trailMap[tx + ty * trailCols];
-      }
-      return 0;
     }
 
     // Lizard Class (More freedom, overlapping segments, less bendy)
@@ -295,7 +225,7 @@
           }
         }
 
-        // Eat Mold Particles
+        // Eat Mold Particles (Bitten off individually)
         for (let i = moldParticles.length - 1; i >= 0; i--) {
           if (dist(nextHead.x, nextHead.y, moldParticles[i].x, moldParticles[i].y) < 15) {
             moldParticles.splice(i, 1);
@@ -439,9 +369,6 @@
 
     function windowResized() {
       resizeCanvas(windowWidth, windowHeight);
-      trailCols = floor(width / TRAIL_SCALE);
-      trailRows = floor(height / TRAIL_SCALE);
-      initTrailMap();
     }
   </script>
 </body>
