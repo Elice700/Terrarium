@@ -60,24 +60,33 @@
       ellipse(width / 2, height / 2, min(width, height) * 0.9);
       pop();
 
-      // Slow continuous growth/expansion of mold inward
+      // 2. Update & Draw Layer 2: Mold Growth (Stuck / Stacked colony growing inward toward center)
+      noStroke();
+      fill(100, 190, 80, 220);
+      
+      // Update mold growth behavior: pick existing mold particles near the inner frontier and branch inward
       if (frameCount % 2 === 0 && moldParticles.length < 5500) {
-        let parent = random(moldParticles);
-        let angle = random(360);
-        let nx = parent.x + cos(angle) * 4;
-        let ny = parent.y + sin(angle) * 4;
-        let dCenter = dist(nx, ny, width / 2, height / 2);
-        if (dCenter > min(width, height) * 0.15 && dCenter < min(width, height) * 0.44) {
-          moldParticles.push(new MoldParticle(nx, ny));
+        // Pick from the outer half of existing mold particles to push growth inward
+        let idx = floor(random(moldParticles.length * 0.3, moldParticles.length));
+        let parent = moldParticles[idx];
+        if (parent) {
+          // Angle pointing generally toward the center
+          let centerAngle = atan2(height / 2 - parent.y, width / 2 - parent.x);
+          let angle = centerAngle + random(-35, 35);
+          let nx = parent.x + cos(angle) * 4;
+          let ny = parent.y + sin(angle) * 4;
+          
+          let dCenter = dist(nx, ny, width / 2, height / 2);
+          // Keep within terrarium bounds and prevent crossing into deep center
+          if (dCenter > min(width, height) * 0.22 && dCenter < min(width, height) * 0.44) {
+            moldParticles.push(new MoldParticle(nx, ny));
+          }
         }
       }
 
-      // 2. Update & Draw Layer 2: Tiny Mold Particles
-      noStroke();
-      fill(100, 190, 80, 220);
       for (let i = 0; i < moldParticles.length; i++) {
         let p = moldParticles[i];
-        circle(p.x, p.y, 3); // Smaller size (radius 1.5)
+        circle(p.x, p.y, 3);
       }
 
       // Draw Pink Dot Snacks spawned by user tapping
@@ -193,7 +202,7 @@
           }
         }
 
-        // Greater freedom boundary (roams widely without hitting mold ring)
+        // Greater freedom boundary
         let distFromCenter = dist(nextHead.x, nextHead.y, width / 2, height / 2);
         let maxLizardRadius = min(width, height) * 0.41;
         if (distFromCenter > maxLizardRadius) {
@@ -354,7 +363,7 @@
         return;
       }
 
-      // 2. Tapping anywhere else inside terrarium glass spawns a pink snack (without deleting mold)
+      // 2. Tapping anywhere else inside terrarium glass spawns a pink snack
       let dCenter = dist(ix, iy, width / 2, height / 2);
       if (dCenter < min(width, height) * 0.45) {
         pinkFood.push(createVector(ix, iy));
