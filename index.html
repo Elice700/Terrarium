@@ -32,41 +32,24 @@
     let heartParticles = [];
     let lizard;
 
-    // Mold (Physarum-inspired agent behavior) parameters
-    const SENSOR_ANGLE = 45; // Degrees
-    const SENSOR_DIST = 15;
-    const STEP_SIZE = 1.2;
-    const TRAIL_SCALE = 4;
-    let trailMap = [];
-    let trailCols, trailRows;
-
     function setup() {
       let canvas = createCanvas(windowWidth, windowHeight);
       canvas.parent('canvas-container');
       angleMode(DEGREES);
 
-      trailCols = floor(width / TRAIL_SCALE);
-      trailRows = floor(height / TRAIL_SCALE);
-      initTrailMap();
-
       // Instantiate Lizard in the center
       lizard = new Lizard(width / 2, height / 2);
 
-      // Initial batch of mold particles around edges
-      for (let i = 0; i < 150; i++) {
-        spawnMoldAtEdge();
+      // Initial anchor mold cluster at the edges
+      for (let i = 0; i < 40; i++) {
+        spawnEdgeCluster();
       }
     }
 
-    function initTrailMap() {
-      trailMap = new Float32Array(trailCols * trailRows);
-    }
-
     function draw() {
-      // 1. Draw Layer 1: Light Grey Background with a clean terrarium glass circle
+      // 1. Draw Layer 1: Light Grey Background & Terrarium glass container frame
       background(235, 235, 235);
       
-      // Terrarium glass container base effect
       push();
       noStroke();
       fill(250, 250, 250, 200);
@@ -77,29 +60,15 @@
       ellipse(width / 2, height / 2, min(width, height) * 0.88);
       pop();
 
-      // Continuous slow spawn of mold particles on edges
-      if (frameCount % 3 === 0 && moldParticles.length < 500) {
-        spawnMoldAtEdge();
+      // Continuous slow spawn of edge mold clusters
+      if (frameCount % 45 === 0 && moldParticles.length < 1200) {
+        spawnEdgeCluster();
       }
 
-      // Evaporate trail map
-      for (let i = 0; i < trailMap.length; i++) {
-        trailMap[i] *= 0.95;
-      }
-
-      // 2. Update & Draw Layer 2: Mold Growth
-      noStroke();
-      fill(100, 190, 80, 200);
+      // 2. Update & Draw Layer 2: Mold Growth (Stuck / Stacked colony growth)
       for (let i = moldParticles.length - 1; i >= 0; i--) {
-        let p = moldParticles[i];
-        p.update();
-        p.display();
-
-        let tx = floor(p.x / TRAIL_SCALE);
-        let ty = floor(p.y / TRAIL_SCALE);
-        if (tx >= 0 && tx < trailCols && ty >= 0 && ty < trailRows) {
-          trailMap[tx + ty * trailCols] = min(1.0, trailMap[tx + ty * trailCols] + 0.3);
-        }
+        moldParticles[i].update();
+        moldParticles[i].display();
       }
 
       // Draw Pink Dot Snacks spawned by user clicking mold
@@ -111,7 +80,7 @@
         circle(f.x, f.y, 10 + sin(frameCount * 10 + i) * 2);
       }
 
-      // 3. Update & Draw Layer 3: Lizard
+      // 3. Update & Draw Layer 3: Orange Lizard with overlapping body & white eyes
       lizard.update();
       lizard.display();
 
@@ -126,78 +95,67 @@
       }
     }
 
-    function spawnMoldAtEdge() {
-      let x, y, angle;
+    function spawnEdgeCluster() {
       let side = floor(random(4));
-      if (side === 0) { x = random(width); y = 0; }
-      else if (side === 1) { x = width; y = random(height); }
-      else if (side === 2) { x = random(width); y = height; }
-      else { x = 0; y = random(height); }
-      
-      let centerAngle = atan2(height / 2 - y, width / 2 - x);
-      angle = centerAngle + random(-30, 30);
-      moldParticles.push(new MoldParticle(x, y, angle));
+      let x, y;
+      if (side === 0) { x = random(width * 0.1, width * 0.9); y = 20; }
+      else if (side === 1) { x = width - 20; y = random(height * 0.1, height * 0.9); }
+      else if (side === 2) { x = random(width * 0.1, width * 0.9); y = height - 20; }
+      else { x = 20; y = random(height * 0.1, height * 0.9); }
+
+      // If first particles, make them static anchors at edge
+      if (moldParticles.length < 15) {
+        moldParticles.push(new MoldCluster(x, y, true));
+      } else {
+        // Spawn near an existing mold particle so it stacks/grows outward
+        let parent = random(moldParticles);
+        let angle = random(360);
+        let nx = constrain(parent.x + cos(angle) * 8, 15, width - 15);
+        let ny = constrain(parent.y + sin(angle) * 8, 15, height - 15);
+        moldParticles.push(new MoldCluster(nx, ny, false));
+      }
     }
 
-    class MoldParticle {
-      constructor(x, y, angle) {
+    class MoldCluster {
+      constructor(x, y, isAnchor) {
         this.x = x;
         this.y = y;
-        this.angle = angle;
+        this.isAnchor = isAnchor;
+        this.radius = 5;
+        this.gainedChild = false;
       }
 
       update() {
-        let centerHeading = atan2(height / 2 - this.y, width / 2 - this.x);
-        
-        let fwdX = this.x + cos(this.angle) * SENSOR_DIST;
-        let fwdY = this.y + sin(this.angle) * SENSOR_DIST;
-        let leftX = this.x + cos(this.angle - SENSOR_ANGLE) * SENSOR_DIST;
-        let leftY = this.y + sin(this.angle - SENSOR_ANGLE) * SENSOR_DIST;
-        let rightX = this.x + cos(this.angle + SENSOR_ANGLE) * SENSOR_DIST;
-        let rightY = this.y + sin(this.angle + SENSOR_ANGLE) * SENSOR_DIST;
-
-        let fwdVal = getTrailValue(fwdX, fwdY);
-        let leftVal = getTrailValue(leftX, leftY);
-        let rightVal = getTrailValue(rightX, rightY);
-
-        if (fwdVal > leftVal && fwdVal > rightVal) {
-          // Keep straight
-        } else if (leftVal > rightVal) {
-          this.angle -= 12;
-        } else if (rightVal > leftVal) {
-          this.angle += 12;
-        } else {
-          this.angle += (centerHeading - this.angle) * 0.05 + random(-8, 8);
+        // Slow outward growth by stacking new particles onto existing edge tips
+        if (!this.isAnchor && !this.gainedChild && random() < 0.015 && moldParticles.length < 1200) {
+          let angle = atan2(height / 2 - this.y, width / 2 - this.x) + random(-45, 45);
+          let nx = this.x + cos(angle) * 7;
+          let ny = this.y + sin(angle) * 7;
+          
+          // Ensure it stays away from lizard zone center and within terrarium glass
+          let dCenter = dist(nx, ny, width / 2, height / 2);
+          if (dCenter > min(width, height) * 0.22 && dCenter < min(width, height) * 0.43) {
+            moldParticles.push(new MoldCluster(nx, ny, false));
+            this.gainedChild = true;
+          }
         }
-
-        this.x += cos(this.angle) * STEP_SIZE;
-        this.y += sin(this.angle) * STEP_SIZE;
-
-        this.x = constrain(this.x, 2, width - 2);
-        this.y = constrain(this.y, 2, height - 2);
       }
 
       display() {
-        circle(this.x, this.y, 4);
+        noStroke();
+        fill(100, 190, 80, 220);
+        circle(this.x, this.y, this.radius * 2);
       }
     }
 
-    function getTrailValue(x, y) {
-      let tx = floor(x / TRAIL_SCALE);
-      let ty = floor(y / TRAIL_SCALE);
-      if (tx >= 0 && tx < trailCols && ty >= 0 && ty < trailRows) {
-        return trailMap[tx + ty * trailCols];
-      }
-      return 0;
-    }
-
+    // Lizard Class (Stiff, non-overlapping segments, high freedom but restricted from mold edges)
     class Lizard {
       constructor(x, y) {
         this.numSegments = 16;
-        this.segmentLen = 14;
+        this.segmentLen = 10; // Shorter distance for tight overlap
         this.history = [];
         this.headAngle = 0;
-        this.speed = 2.2;
+        this.speed = 2.0;
 
         for (let i = 0; i < this.numSegments; i++) {
           this.history.push(createVector(x - i * this.segmentLen, y));
@@ -209,6 +167,7 @@
         let target = null;
         let minDist = Infinity;
 
+        // Priority 1: Pink food
         for (let f of pinkFood) {
           let d = dist(head.x, head.y, f.x, f.y);
           if (d < minDist) {
@@ -217,36 +176,41 @@
           }
         }
 
+        // Priority 2: Mold closest to center
         if (!target) {
           let center = createVector(width / 2, height / 2);
           for (let p of moldParticles) {
             let distFromCenter = dist(p.x, p.y, center.x, center.y);
             let distFromHead = dist(p.x, p.y, head.x, head.y);
-            if (distFromCenter < max(width, height) * 0.45 && distFromHead < minDist) {
+            // Only target inner mold growths
+            if (distFromCenter < min(width, height) * 0.38 && distFromHead < minDist) {
               minDist = distFromHead;
               target = createVector(p.x, p.y);
             }
           }
         }
 
+        // Wander fallback
         if (!target) {
-          let wanderX = width / 2 + cos(frameCount * 1.5) * (width * 0.25);
-          let wanderY = height / 2 + sin(frameCount * 1.1) * (height * 0.25);
+          let wanderX = width / 2 + cos(frameCount * 1.2) * (width * 0.18);
+          let wanderY = height / 2 + sin(frameCount * 0.9) * (height * 0.18);
           target = createVector(wanderX, wanderY);
         }
 
+        // Stiff steering (less bendy)
         let desiredAngle = atan2(target.y - head.y, target.x - head.x);
         let angleDiff = (desiredAngle - this.headAngle + 540) % 360 - 180;
-        this.headAngle += constrain(angleDiff, -6, 6);
+        this.headAngle += constrain(angleDiff, -3.5, 3.5); // Lower turning rate makes it stiffer / less bendy
 
         let nextHead = createVector(
           head.x + cos(this.headAngle) * this.speed,
           head.y + sin(this.headAngle) * this.speed
         );
 
-        for (let i = 4; i < this.history.length; i++) {
-          if (p5.Vector.dist(nextHead, this.history[i]) < this.segmentLen * 0.8) {
-            this.headAngle += 45;
+        // Self-collision avoidance (prevent getting stuck on itself)
+        for (let i = 5; i < this.history.length; i++) {
+          if (p5.Vector.dist(nextHead, this.history[i]) < this.segmentLen * 0.9) {
+            this.headAngle += 25; // Gentle push away from self
             nextHead = createVector(
               head.x + cos(this.headAngle) * this.speed,
               head.y + sin(this.headAngle) * this.speed
@@ -255,13 +219,15 @@
           }
         }
 
+        // Freedom boundary: stays out of outer mold spawn ring, but roams freely in middle
         let distFromCenter = dist(nextHead.x, nextHead.y, width / 2, height / 2);
-        let maxRadius = min(width, height) * 0.42;
-        if (distFromCenter > maxRadius) {
+        let maxLizardRadius = min(width, height) * 0.34; // Keeps it away from mold zone
+        if (distFromCenter > maxLizardRadius) {
           let angleToCenter = atan2(height / 2 - nextHead.y, width / 2 - nextHead.x);
           this.headAngle = angleToCenter;
         }
 
+        // Update body chain with overlapping solid segments
         this.history[0] = nextHead;
         for (let i = 1; i < this.history.length; i++) {
           let prev = this.history[i - 1];
@@ -271,6 +237,7 @@
           this.history[i] = p5.Vector.sub(prev, dir);
         }
 
+        // Eat Pink Food
         for (let i = pinkFood.length - 1; i >= 0; i--) {
           if (dist(nextHead.x, nextHead.y, pinkFood[i].x, pinkFood[i].y) < 18) {
             pinkFood.splice(i, 1);
@@ -278,6 +245,7 @@
           }
         }
 
+        // Eat Mold Particles
         for (let i = moldParticles.length - 1; i >= 0; i--) {
           if (dist(nextHead.x, nextHead.y, moldParticles[i].x, moldParticles[i].y) < 16) {
             moldParticles.splice(i, 1);
@@ -287,34 +255,38 @@
 
       display() {
         noStroke();
-        this.drawLegPair(3, 24, 40);
-        this.drawLegPair(10, 20, 50);
+        this.drawLegPair(3, 22, 40);
+        this.drawLegPair(9, 18, 50);
 
+        // Draw Orange Overlapping Body Segments (Tail to Head)
         for (let i = this.history.length - 1; i >= 0; i--) {
           let pos = this.history[i];
-          let size = map(i, 0, this.history.length - 1, 22, 6);
-          fill(50 + i * 2, 160 - i * 3, 90);
-          stroke(25, 80, 45);
+          let size = map(i, 0, this.history.length - 1, 22, 14); // Thick overlapping tail particles
+
+          fill(240, 130, 40);
+          stroke(180, 80, 20);
           strokeWeight(2);
           circle(pos.x, pos.y, size);
         }
 
+        // Draw Orange Lizard Head & White Eyes
         let head = this.history[0];
         push();
         translate(head.x, head.y);
         rotate(this.headAngle);
-        fill(60, 180, 100);
-        stroke(25, 80, 45);
+        fill(250, 140, 50);
+        stroke(180, 80, 20);
         strokeWeight(2);
-        ellipse(2, 0, 26, 20);
+        ellipse(2, 0, 28, 22);
 
-        fill(255, 215, 0);
+        // White Eyes with dark pupils
+        fill(255, 255, 255);
         noStroke();
-        ellipse(6, -6, 6, 6);
-        ellipse(6, 6, 6, 6);
-        fill(0);
-        ellipse(7, -6, 2, 4);
-        ellipse(7, 6, 2, 4);
+        ellipse(6, -6, 7, 7);
+        ellipse(6, 6, 7, 7);
+        fill(30);
+        ellipse(7, -6, 3, 4);
+        ellipse(7, 6, 3, 4);
         pop();
       }
 
@@ -324,11 +296,11 @@
         let prev = this.history[segmentIdx - 1];
         let angle = atan2(pos.y - prev.y, pos.x - prev.x);
 
-        stroke(40, 120, 60);
+        stroke(200, 100, 30);
         strokeWeight(4);
         strokeCap(ROUND);
 
-        let wiggle = sin(frameCount * 15 + segmentIdx * 10) * 15;
+        let wiggle = sin(frameCount * 12 + segmentIdx * 10) * 12;
 
         push();
         translate(pos.x, pos.y);
@@ -423,9 +395,6 @@
 
     function windowResized() {
       resizeCanvas(windowWidth, windowHeight);
-      trailCols = floor(width / TRAIL_SCALE);
-      trailRows = floor(height / TRAIL_SCALE);
-      initTrailMap();
     }
   </script>
 </body>
