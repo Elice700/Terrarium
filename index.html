@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Terrarium</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0d130e;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      user-select: none;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <script>
+    let bgImg;
+    let moldParticles = [];
+    let pinkFood = [];
+    let heartParticles = [];
+    let lizard;
+
+    // Mold (Physarum-inspired agent behavior) parameters
+    const SENSOR_ANGLE = 45; // Degrees
+    const SENSOR_DIST = 15;
+    const STEP_SIZE = 1.2;
+    const TRAIL_SCALE = 4; // Downscaled grid for trail map calculations
+    let trailMap = [];
+    let trailCols, trailRows;
+
+    function preload() {
+      // Direct asset link provided for background
+      bgImg = loadImage('https://share.google/vCOBBNpLuQkbE9t3S');
+    }
+
+    function setup() {
+      let canvas = createCanvas(windowWidth, windowHeight);
+      canvas.parent('canvas-container');
+      angleMode(DEGREES);
+
+      trailCols = floor(width / TRAIL_SCALE);
+      trailRows = floor(height / TRAIL_SCALE);
+      initTrailMap();
+
+      // Instantiate Lizard in the center
+      lizard = new Lizard(width / 2, height / 2);
+
+      // Initial batch of mold particles around edges
+      for (let i = 0; i < 150; i++) {
+        spawnMoldAtEdge();
+      }
+    }
+
+    function initTrailMap() {
+      trailMap = new Float32Array(trailCols * trailRows);
+    }
+
+    function draw() {
+      // 1. Draw Layer 1: Background
+      background(15, 25, 18);
+      if (bgImg && bgImg.width > 0) {
+        let imgAspect = bgImg.width / bgImg.height;
+        let canvasAspect = width / height;
+        let drawW, drawH, drawX, drawY;
+
+        if (canvasAspect > imgAspect) {
+          drawW = width;
+          drawH = width / imgAspect;
+          drawX = 0;
+          drawY = (height - drawH) / 2;
+        } else {
+          drawH = height;
+          drawW = height * imgAspect;
+          drawX = (width - drawW) / 2;
+          drawY = 0;
+        }
+        image(bgImg, drawX, drawY, drawW, drawH);
+      } else {
+        // Fallback terrarium background gradient if image fails to load
+        noStroke();
+        fill(25, 45, 30);
+        ellipse(width / 2, height / 2, width * 0.9, height * 0.9);
+      }
+
+      // Continuous slow spawn of mold particles on edges
+      if (frameCount % 3 === 0 && moldParticles.length < 500) {
+        spawnMoldAtEdge();
+      }
+
+      // Evaporate trail map
+      for (let i = 0; i < trailMap.length; i++) {
+        trailMap[i] *= 0.95;
+      }
+
+      // 2. Update & Draw Layer 2: Mold Growth
+      noStroke();
+      fill(110, 210, 90, 180);
+      for (let i = moldParticles.length - 1; i >= 0; i--) {
+        let p = moldParticles[i];
+        p.update();
+        p.display();
+
+        // Deposit on trail grid
+        let tx = floor(p.x / TRAIL_SCALE);
+        let ty = floor(p.y / TRAIL_SCALE);
+        if (tx >= 0 && tx < trailCols && ty >= 0 && ty < trailRows) {
+          trailMap[tx + ty * trailCols] = min(1.0, trailMap[tx + ty * trailCols] + 0.3);
+        }
+      }
+
+      // Draw Pink Dot Snacks spawned by user clicking mold
+      for (let i = pinkFood.length - 1; i >= 0; i--) {
+        let f = pinkFood[i];
+        fill(255, 105, 180);
+        stroke(255, 192, 203);
+        strokeWeight(1.5);
+        circle(f.x, f.y, 10 + sin(frameCount * 10 + i) * 2);
+      }
+
+      // 3. Update & Draw Layer 3: Lizard
+      lizard.update();
+      lizard.display();
+
+      // 4. Update & Draw Layer 4: Floating Hearts & Interactive FX
+      for (let i = heartParticles.length - 1; i >= 0; i--) {
+        let hp = heartParticles[i];
+        hp.update();
+        hp.display();
+        if (hp.isDead()) {
+          heartParticles.splice(i, 1);
+        }
+      }
+    }
+
+    // Helper: Spawn Mold at Screen Edges heading inward
+    function spawnMoldAtEdge() {
+      let x, y, angle;
+      let side = floor(random(4));
+      if (side === 0) { // Top
+        x = random(width);
+        y = 0;
+      } else if (side === 1) { // Right
+        x = width;
+        y = random(height);
+      } else if (side === 2) { // Bottom
+        x = random(width);
+        y = height;
+      } else { // Left
+        x = 0;
+        y = random(height);
+      }
+      
+      // Calculate angle pointing roughly towards center with slight randomness
+      let centerAngle = atan2(height / 2 - y, width / 2 - x);
+      angle = centerAngle + random(-30, 30);
+      moldParticles.push(new MoldParticle(x, y, angle));
+    }
+
+    // Mold Particle Class
+    class MoldParticle {
+      constructor(x, y, angle) {
+        this.x = x;
+        this.y = y;
+        this.angle = angle;
+      }
+
+      update() {
+        // Sensor positions
+        let centerHeading = atan2(height / 2 - this.y, width / 2 - this.x);
+        
+        let fwdX = this.x + cos(this.angle) * SENSOR_DIST;
+        let fwdY = this.y + sin(this.angle) * SENSOR_DIST;
+        let leftX = this.x + cos(this.angle - SENSOR_ANGLE) * SENSOR_DIST;
+        let leftY = this.y + sin(this.angle - SENSOR_ANGLE) * SENSOR_DIST;
+        let rightX = this.x + cos(this.angle + SENSOR_ANGLE) * SENSOR_DIST;
+        let rightY = this.y + sin(this.angle + SENSOR_ANGLE) * SENSOR_DIST;
+
+        let fwdVal = getTrailValue(fwdX, fwdY);
+        let leftVal = getTrailValue(leftX, leftY);
+        let rightVal = getTrailValue(rightX, rightY);
+
+        // Mold prefers following existing trails while maintaining inward drift
+        if (fwdVal > leftVal && fwdVal > rightVal) {
+          // Keep straight
+        } else if (leftVal > rightVal) {
+          this.angle -= 12;
+        } else if (rightVal > leftVal) {
+          this.angle += 12;
+        } else {
+          // Slight steering towards center when no local trail gradient
+          this.angle += (centerHeading - this.angle) * 0.05 + random(-8, 8);
+        }
+
+        this.x += cos(this.angle) * STEP_SIZE;
+        this.y += sin(this.angle) * STEP_SIZE;
+
+        // Keep inside screen bounds
+        this.x = constrain(this.x, 2, width - 2);
+        this.y = constrain(this.y, 2, height - 2);
+      }
+
+      display() {
+        circle(this.x, this.y, 4);
+      }
+    }
+
+    function getTrailValue(x, y) {
+      let tx = floor(x / TRAIL_SCALE);
+      let ty = floor(y / TRAIL_SCALE);
+      if (tx >= 0 && tx < trailCols && ty >= 0 && ty < trailRows) {
+        return trailMap[tx + ty * trailCols];
+      }
+      return 0;
+    }
+
+    // Lizard Class (Snake-like body logic, non-self-overlapping movement)
+    class Lizard {
+      constructor(x, y) {
+        this.numSegments = 16;
+        this.segmentLen = 14;
+        this.history = [];
+        this.headAngle = 0;
+        this.speed = 2.2;
+
+        for (let i = 0; i < this.numSegments; i++) {
+          this.history.push(createVector(x - i * this.segmentLen, y));
+        }
+      }
+
+      update() {
+        let head = this.history[0].copy();
+
+        // 1. Find target (Pink snacks take priority over inner mold)
+        let target = null;
+        let minDist = Infinity;
+
+        // Check pink food
+        for (let f of pinkFood) {
+          let d = dist(head.x, head.y, f.x, f.y);
+          if (d < minDist) {
+            minDist = d;
+            target = createVector(f.x, f.y);
+          }
+        }
+
+        // If no pink food, find mold particles nearest to center area
+        if (!target) {
+          let center = createVector(width / 2, height / 2);
+          for (let p of moldParticles) {
+            let distFromCenter = dist(p.x, p.y, center.x, center.y);
+            let distFromHead = dist(p.x, p.y, head.x, head.y);
+            // Target mold close to center and within lizard reach
+            if (distFromCenter < max(width, height) * 0.45 && distFromHead < minDist) {
+              minDist = distFromHead;
+              target = createVector(p.x, p.y);
+            }
+          }
+        }
+
+        // Fallback wander target near center if no mold or food
+        if (!target) {
+          let wanderX = width / 2 + cos(frameCount * 1.5) * (width * 0.25);
+          let wanderY = height / 2 + sin(frameCount * 1.1) * (height * 0.25);
+          target = createVector(wanderX, wanderY);
+        }
+
+        // Steer towards target
+        let desiredAngle = atan2(target.y - head.y, target.x - head.x);
+        let angleDiff = (desiredAngle - this.headAngle + 540) % 360 - 180;
+        this.headAngle += constrain(angleDiff, -6, 6);
+
+        // Move head forward
+        let nextHead = createVector(
+          head.x + cos(this.headAngle) * this.speed,
+          head.y + sin(this.headAngle) * this.speed
+        );
+
+        // Self-collision avoidance (snake mechanics: prevent overlapping own tail)
+        for (let i = 4; i < this.history.length; i++) {
+          if (p5.Vector.dist(nextHead, this.history[i]) < this.segmentLen * 0.8) {
+            // Turn sharply to avoid tail collision
+            this.headAngle += 45;
+            nextHead = createVector(
+              head.x + cos(this.headAngle) * this.speed,
+              head.y + sin(this.headAngle) * this.speed
+            );
+            break;
+          }
+        }
+
+        // Keep lizard within middle-terrarium radius limit
+        let distFromCenter = dist(nextHead.x, nextHead.y, width / 2, height / 2);
+        let maxRadius = min(width, height) * 0.42;
+        if (distFromCenter > maxRadius) {
+          let angleToCenter = atan2(height / 2 - nextHead.y, width / 2 - nextHead.x);
+          this.headAngle = angleToCenter;
+        }
+
+        // Segment IK / follow behavior
+        this.history[0] = nextHead;
+        for (let i = 1; i < this.history.length; i++) {
+          let prev = this.history[i - 1];
+          let curr = this.history[i];
+          let dir = p5.Vector.sub(prev, curr);
+          dir.setMag(this.segmentLen);
+          this.history[i] = p5.Vector.sub(prev, dir);
+        }
+
+        // Eat Pink Food
+        for (let i = pinkFood.length - 1; i >= 0; i--) {
+          if (dist(nextHead.x, nextHead.y, pinkFood[i].x, pinkFood[i].y) < 18) {
+            pinkFood.splice(i, 1);
+            spawnHearts(nextHead.x, nextHead.y, 4);
+          }
+        }
+
+        // Eat Mold Particles
+        for (let i = moldParticles.length - 1; i >= 0; i--) {
+          if (dist(nextHead.x, nextHead.y, moldParticles[i].x, moldParticles[i].y) < 16) {
+            moldParticles.splice(i, 1);
+          }
+        }
+      }
+
+      display() {
+        noStroke();
+        // Decorative Legs attached to segments 3 and 10
+        this.drawLegPair(3, 24, 40);
+        this.drawLegPair(10, 20, 50);
+
+        // Draw Snake/Lizard Tapered Body
+        for (let i = this.history.length - 1; i >= 0; i--) {
+          let pos = this.history[i];
+          let size = map(i, 0, this.history.length - 1, 22, 6);
+
+          // Body gradient shades of terrarium reptilian green
+          fill(40 + i * 3, 140 - i * 4, 70);
+          stroke(20, 70, 35);
+          strokeWeight(2);
+          circle(pos.x, pos.y, size);
+        }
+
+        // Draw Lizard Head & Eyes
+        let head = this.history[0];
+        push();
+        translate(head.x, head.y);
+        rotate(this.headAngle);
+        fill(50, 160, 80);
+        stroke(20, 70, 35);
+        strokeWeight(2);
+        ellipse(2, 0, 26, 20);
+
+        // Eyes
+        fill(255, 215, 0);
+        noStroke();
+        ellipse(6, -6, 6, 6);
+        ellipse(6, 6, 6, 6);
+        fill(0);
+        ellipse(7, -6, 2, 4);
+        ellipse(7, 6, 2, 4);
+        pop();
+      }
+
+      drawLegPair(segmentIdx, legLen, restAngle) {
+        if (segmentIdx >= this.history.length) return;
+        let pos = this.history[segmentIdx];
+        let prev = this.history[segmentIdx - 1];
+        let angle = atan2(pos.y - prev.y, pos.x - prev.x);
+
+        stroke(35, 110, 55);
+        strokeWeight(4);
+        strokeCap(ROUND);
+
+        // Walk cycle wiggle modulation based on frameCount
+        let wiggle = sin(frameCount * 15 + segmentIdx * 10) * 15;
+
+        // Left leg
+        push();
+        translate(pos.x, pos.y);
+        rotate(angle - restAngle + wiggle);
+        line(0, 0, 0, -legLen);
+        pop();
+
+        // Right leg
+        push();
+        translate(pos.x, pos.y);
+        rotate(angle + restAngle - wiggle);
+        line(0, 0, 0, legLen);
+        pop();
+      }
+
+      containsPoint(px, py) {
+        // Check touch/click hit on head or front body segments
+        for (let i = 0; i < 6; i++) {
+          if (dist(px, py, this.history[i].x, this.history[i].y) < 22) {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+
+    // Interactive Heart Floating FX Particle
+    class HeartParticle {
+      constructor(x, y) {
+        this.x = x + random(-10, 10);
+        this.y = y + random(-10, 10);
+        this.vy = random(-2, -0.8);
+        this.vx = random(-0.5, 0.5);
+        this.alpha = 255;
+        this.size = random(16, 24);
+      }
+
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.alpha -= 4;
+      }
+
+      display() {
+        push();
+        translate(this.x, this.y);
+        textSize(this.size);
+        textAlign(CENTER, CENTER);
+        // Fade out
+        fill(255, 255, 255, this.alpha);
+        text('❤️', 0, 0);
+        pop();
+      }
+
+      isDead() {
+        return this.alpha <= 0;
+      }
+    }
+
+    function spawnHearts(x, y, count = 3) {
+      for (let i = 0; i < count; i++) {
+        heartParticles.push(new HeartParticle(x, y));
+      }
+    }
+
+    // Touch / Click Interaction Handler (Layer 4 interactions)
+    function mousePressed() {
+      handleInteraction(mouseX, mouseY);
+    }
+
+    function touchStarted() {
+      if (touches.length > 0) {
+        handleInteraction(touches[0].x, touches[0].y);
+      }
+      return false; // Prevent default browser scrolling on touch
+    }
+
+    function handleInteraction(ix, iy) {
+      // 1. If user taps Lizard -> pat lizard and spawn hearts
+      if (lizard.containsPoint(ix, iy)) {
+        spawnHearts(lizard.history[0].x, lizard.history[0].y, 5);
+        return;
+      }
+
+      // 2. If user taps Mold -> spawn pink food snacks that lizard priority eats
+      let tappedMold = false;
+      for (let i = moldParticles.length - 1; i >= 0; i--) {
+        let p = moldParticles[i];
+        if (dist(ix, iy, p.x, p.y) < 25) {
+          moldParticles.splice(i, 1);
+          tappedMold = true;
+        }
+      }
+
+      if (tappedMold) {
+        pinkFood.push(createVector(ix, iy));
+      }
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      trailCols = floor(width / TRAIL_SCALE);
+      trailRows = floor(height / TRAIL_SCALE);
+      initTrailMap();
+    }
+  </script>
+</body>
+</html>
