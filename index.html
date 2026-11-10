@@ -45,7 +45,7 @@
     }
 
     function initEdgeMoldBorder() {
-      let radius = min(width, height) * 0.44;
+      let radius = min(width, height) * 0.5;
       // Spawn points all around the circular perimeter edge to cover it solidly
       for (let angle = 0; angle < 360; angle += 1.5) {
         let x = width / 2 + cos(angle) * radius;
