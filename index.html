@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Interactive Terrarium - Fullscreen</title>
+  <title>Interactive Terrarium - Fullscreen Edge Mold</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
   <style>
     body {
@@ -40,48 +40,56 @@
       // Instantiate Lizard in the center
       lizard = new Lizard(width / 2, height / 2);
 
-      // Create initial border coating of mold along the full screen edges
-      initEdgeMoldBorder();
+      // Populate full screen edges with initial solid mold coating
+      initScreenEdgeMold();
     }
 
-    function initEdgeMoldBorder() {
+    function initScreenEdgeMold() {
       moldParticles = [];
-      // Spawn points along the entire screen border rectangle
       // Top & Bottom edges
-      for (let x = 0; x < width; x += 12) {
-        moldParticles.push(new MoldNode(x, 5, true));
-        moldParticles.push(new MoldNode(x, height - 5, true));
+      for (let x = 0; x < width; x += 10) {
+        moldParticles.push(new MoldNode(x, 4));
+        moldParticles.push(new MoldNode(x, height - 4));
       }
       // Left & Right edges
-      for (let y = 0; y < height; y += 12) {
-        moldParticles.push(new MoldNode(5, y, true));
-        moldParticles.push(new MoldNode(width - 5, y, true));
+      for (let y = 0; y < height; y += 10) {
+        moldParticles.push(new MoldNode(4, y));
+        moldParticles.push(new MoldNode(width - 4, y));
       }
     }
 
     function draw() {
-      // 1. Draw Layer 1: Fullscreen Light Grey Background
+      // 1. Layer 1: Full window light grey background (NO circle boundary)
       background(235, 235, 235);
 
-      // 2. High spawn rate & Strand growth behavior toward center from full screen edges
-      if (frameCount % 1 === 0 && moldParticles.length < 6000) {
-        let parentIdx = floor(random(moldParticles.length));
-        let parent = moldParticles[parentIdx];
+      // 2. Layer 2: Mold Growth - high spawn rate, covering edges and stacking into inward strands
+      if (moldParticles.length < 7000) {
+        // Spawn fresh particles directly along outer screen edges continuously
+        let side = floor(random(4));
+        let sx, sy;
+        if (side === 0) { sx = random(width); sy = random(0, 8); }
+        else if (side === 1) { sx = random(width); sy = height - random(0, 8); }
+        else if (side === 2) { sx = random(0, 8); sy = random(height); }
+        else { sx = width - random(0, 8); sy = random(height); }
+        moldParticles.push(new MoldNode(sx, sy));
+
+        // Branch existing mold inward in strands pointing toward the center
+        let parent = random(moldParticles);
         if (parent) {
           let centerAngle = atan2(height / 2 - parent.y, width / 2 - parent.x);
-          let angle = centerAngle + random(-20, 20);
-          let nx = parent.x + cos(angle) * 5;
-          let ny = parent.y + sin(angle) * 5;
-          
+          let angle = centerAngle + random(-25, 25);
+          let nx = parent.x + cos(angle) * 4.5;
+          let ny = parent.y + sin(angle) * 4.5;
+
+          // Grow inward across the window, stopping before the very center so lizard has room
           let dCenter = dist(nx, ny, width / 2, height / 2);
-          // Grow inward across the full screen while staying attached to strands
-          if (dCenter > 80 && dCenter < max(width, height) * 0.55) {
-            moldParticles.push(new MoldNode(nx, ny, false));
+          if (dCenter > 120 && nx > 10 && nx < width - 10 && ny > 10 && ny < height - 10) {
+            moldParticles.push(new MoldNode(nx, ny));
           }
         }
       }
 
-      // Update & Draw Layer 2: Mold strands
+      // Render Mold Particles
       noStroke();
       fill(100, 190, 80, 220);
       for (let i = 0; i < moldParticles.length; i++) {
@@ -98,11 +106,11 @@
         circle(f.x, f.y, 10 + sin(frameCount * 10 + i) * 2);
       }
 
-      // 3. Update & Draw Layer 3: Orange Lizard with overlapping body & white eyes
+      // 3. Layer 3: Orange Lizard with overlapping body & white eyes
       lizard.update();
       lizard.display();
 
-      // 4. Update & Draw Layer 4: Floating Hearts & Interactive FX
+      // 4. Layer 4: Floating Hearts & Interactive FX
       for (let i = heartParticles.length - 1; i >= 0; i--) {
         let hp = heartParticles[i];
         hp.update();
@@ -114,14 +122,13 @@
     }
 
     class MoldNode {
-      constructor(x, y, isEdge) {
+      constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.isEdge = isEdge;
       }
     }
 
-    // Lizard Class (Fullscreen freedom, overlapping segments, less bendy)
+    // Lizard Class (Full window freedom, overlapping segments, less bendy)
     class Lizard {
       constructor(x, y) {
         this.numSegments = 18;
@@ -155,17 +162,17 @@
           for (let p of moldParticles) {
             let distFromCenter = dist(p.x, p.y, center.x, center.y);
             let distFromHead = dist(p.x, p.y, head.x, head.y);
-            if (distFromCenter < max(width, height) * 0.42 && distFromHead < minDist) {
+            if (distFromCenter < min(width, height) * 0.42 && distFromHead < minDist) {
               minDist = distFromHead;
               target = createVector(p.x, p.y);
             }
           }
         }
 
-        // Wander fallback across the middle area
+        // Wander fallback across the window middle area
         if (!target) {
-          let wanderX = width / 2 + cos(frameCount * 1.0) * (width * 0.25);
-          let wanderY = height / 2 + sin(frameCount * 0.8) * (height * 0.25);
+          let wanderX = width / 2 + cos(frameCount * 1.0) * (width * 0.28);
+          let wanderY = height / 2 + sin(frameCount * 0.8) * (height * 0.28);
           target = createVector(wanderX, wanderY);
         }
 
@@ -191,9 +198,9 @@
           }
         }
 
-        // Fullscreen freedom boundary (stays within screen while keeping away from outer mold edges)
+        // Full window freedom boundary (stays within screen while keeping away from outer mold edge zone)
         let distFromCenter = dist(nextHead.x, nextHead.y, width / 2, height / 2);
-        let maxLizardRadius = min(width, height) * 0.45;
+        let maxLizardRadius = min(width, height) * 0.44;
         if (distFromCenter > maxLizardRadius) {
           let angleToCenter = atan2(height / 2 - nextHead.y, width / 2 - nextHead.x);
           this.headAngle = angleToCenter;
@@ -352,13 +359,13 @@
         return;
       }
 
-      // 2. Tapping anywhere else on the screen spawns a pink snack
+      // 2. Tapping anywhere else on the window spawns a pink snack
       pinkFood.push(createVector(ix, iy));
     }
 
     function windowResized() {
       resizeCanvas(windowWidth, windowHeight);
-      initEdgeMoldBorder();
+      initScreenEdgeMold();
     }
   </script>
 </body>
