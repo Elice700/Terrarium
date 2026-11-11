@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Interactive Terrarium - Fullscreen Edge Mold</title>
+  <title>Interactive Terrarium - Fullscreen</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
   <style>
     body {
@@ -59,12 +59,11 @@
     }
 
     function draw() {
-      // 1. Layer 1: Full window light grey background (NO circle boundary)
+      // 1. Layer 1: Full window light grey background
       background(235, 235, 235);
 
       // 2. Layer 2: Mold Growth - high spawn rate, covering edges and stacking into inward strands
       if (moldParticles.length < 7000) {
-        // Spawn fresh particles directly along outer screen edges continuously
         let side = floor(random(4));
         let sx, sy;
         if (side === 0) { sx = random(width); sy = random(0, 8); }
@@ -73,7 +72,6 @@
         else { sx = width - random(0, 8); sy = random(height); }
         moldParticles.push(new MoldNode(sx, sy));
 
-        // Branch existing mold inward in strands pointing toward the center
         let parent = random(moldParticles);
         if (parent) {
           let centerAngle = atan2(height / 2 - parent.y, width / 2 - parent.x);
@@ -81,7 +79,6 @@
           let nx = parent.x + cos(angle) * 4.5;
           let ny = parent.y + sin(angle) * 4.5;
 
-          // Grow inward across the window, stopping before the very center so lizard has room
           let dCenter = dist(nx, ny, width / 2, height / 2);
           if (dCenter > 120 && nx > 10 && nx < width - 10 && ny > 10 && ny < height - 10) {
             moldParticles.push(new MoldNode(nx, ny));
@@ -106,11 +103,11 @@
         circle(f.x, f.y, 10 + sin(frameCount * 10 + i) * 2);
       }
 
-      // 3. Layer 3: Orange Lizard with overlapping body & white eyes
+      // 3. Update & Draw Layer 3: Orange Lizard with non-overlapping non-adjacent body parts & very smooth turning
       lizard.update();
       lizard.display();
 
-      // 4. Layer 4: Floating Hearts & Interactive FX
+      // 4. Update & Draw Layer 4: Floating Hearts & Interactive FX
       for (let i = heartParticles.length - 1; i >= 0; i--) {
         let hp = heartParticles[i];
         hp.update();
@@ -128,11 +125,11 @@
       }
     }
 
-    // Lizard Class (Full window freedom, overlapping segments, less bendy)
+    // Lizard Class (Very stiff turning angle, strict non-adjacent overlap prevention)
     class Lizard {
       constructor(x, y) {
         this.numSegments = 18;
-        this.segmentLen = 9; // Tightly overlapping
+        this.segmentLen = 9; 
         this.history = [];
         this.headAngle = 0;
         this.speed = 2.2;
@@ -176,20 +173,20 @@
           target = createVector(wanderX, wanderY);
         }
 
-        // Stiff steering (less bendy)
+        // Extremely low turning rate (way less bendy / very smooth curves)
         let desiredAngle = atan2(target.y - head.y, target.x - head.x);
         let angleDiff = (desiredAngle - this.headAngle + 540) % 360 - 180;
-        this.headAngle += constrain(angleDiff, -3.0, 3.0);
+        this.headAngle += constrain(angleDiff, -1.0, 1.0);
 
         let nextHead = createVector(
           head.x + cos(this.headAngle) * this.speed,
           head.y + sin(this.headAngle) * this.speed
         );
 
-        // Self-collision avoidance
-        for (let i = 6; i < this.history.length; i++) {
-          if (p5.Vector.dist(nextHead, this.history[i]) < this.segmentLen * 0.9) {
-            this.headAngle += 20;
+        // Strict non-adjacent overlap prevention (preventing any non-adjacent body parts from overlapping)
+        for (let i = 4; i < this.history.length; i++) {
+          if (p5.Vector.dist(nextHead, this.history[i]) < this.segmentLen * 0.95) {
+            this.headAngle += 10;
             nextHead = createVector(
               head.x + cos(this.headAngle) * this.speed,
               head.y + sin(this.headAngle) * this.speed
@@ -198,7 +195,7 @@
           }
         }
 
-        // Full window freedom boundary (stays within screen while keeping away from outer mold edge zone)
+        // Full window freedom boundary
         let distFromCenter = dist(nextHead.x, nextHead.y, width / 2, height / 2);
         let maxLizardRadius = min(width, height) * 0.44;
         if (distFromCenter > maxLizardRadius) {
@@ -206,14 +203,31 @@
           this.headAngle = angleToCenter;
         }
 
-        // Update body chain with solid overlapping segments
+        // Update body chain with solid segments
         this.history[0] = nextHead;
         for (let i = 1; i < this.history.length; i++) {
           let prev = this.history[i - 1];
           let curr = this.history[i];
           let dir = p5.Vector.sub(prev, curr);
           dir.setMag(this.segmentLen);
-          this.history[i] = p5.Vector.sub(prev, dir);
+          let targetPos = p5.Vector.sub(prev, dir);
+
+          // Check against non-adjacent overlap for internal segments as well
+          let overlapping = false;
+          for (let j = 0; j < this.history.length; j++) {
+            if (abs(i - j) > 1 && p5.Vector.dist(targetPos, this.history[j]) < this.segmentLen * 0.7) {
+              overlapping = true;
+              break;
+            }
+          }
+
+          if (!overlapping) {
+            this.history[i] = targetPos;
+          } else {
+            // Push slightly outward if overlap detected
+            let nudgeAngle = random(360);
+            this.history[i] = createVector(prev.x + cos(nudgeAngle) * this.segmentLen, prev.y + sin(nudgeAngle) * this.segmentLen);
+          }
         }
 
         // Eat Pink Food
@@ -224,7 +238,7 @@
           }
         }
 
-        // Eat Mold Particles (Bitten off individually)
+        // Eat Mold Particles
         for (let i = moldParticles.length - 1; i >= 0; i--) {
           if (dist(nextHead.x, nextHead.y, moldParticles[i].x, moldParticles[i].y) < 15) {
             moldParticles.splice(i, 1);
@@ -353,13 +367,11 @@
     }
 
     function handleInteraction(ix, iy) {
-      // 1. Tapping lizard pats it & spawns hearts
       if (lizard.containsPoint(ix, iy)) {
         spawnHearts(lizard.history[0].x, lizard.history[0].y, 5);
         return;
       }
 
-      // 2. Tapping anywhere else on the window spawns a pink snack
       pinkFood.push(createVector(ix, iy));
     }
 
