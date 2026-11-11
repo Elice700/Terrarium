@@ -28,6 +28,8 @@
 
   <script>
     let moldParticles = [];
+    let spatialGrid = {}; // Grid to enforce strict non-overlapping for green particles
+    let cellSize = 10;
     let pinkFood = [];
     let heartParticles = [];
     let lizard;
@@ -40,21 +42,64 @@
       // Instantiate Lizard securely in the exact center of the screen
       lizard = new Lizard(width / 2, height / 2);
 
-      // Populate full screen edges with initial mold coating
+      // Populate full screen edges with initial solid mold coating
       initScreenEdgeMold();
+    }
+
+    function getKey(x, y) {
+      return floor(x / cellSize) + "," + floor(y / cellSize);
+    }
+
+    function addSpatial(p) {
+      let k = getKey(p.x, p.y);
+      if (!spatialGrid[k]) spatialGrid[k] = [];
+      spatialGrid[k].push(p);
+    }
+
+    function removeSpatial(p) {
+      let k = getKey(p.x, p.y);
+      if (spatialGrid[k]) {
+        let idx = spatialGrid[k].indexOf(p);
+        if (idx !== -1) spatialGrid[k].splice(idx, 1);
+      }
+    }
+
+    function checkOverlap(x, y, minDist = 4) {
+      let cx = floor(x / cellSize);
+      let cy = floor(y / cellSize);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          let k = (cx + dx) + "," + (cy + dy);
+          let cell = spatialGrid[k];
+          if (cell) {
+            for (let p of cell) {
+              if (dist(x, y, p.x, p.y) < minDist) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+      return false;
     }
 
     function initScreenEdgeMold() {
       moldParticles = [];
+      spatialGrid = {};
+      
       // Top & Bottom edges
-      for (let x = 0; x < width; x += 10) {
-        moldParticles.push(new MoldAgent(x, 5, true));
-        moldParticles.push(new MoldAgent(x, height - 5, true));
+      for (let x = 10; x < width - 10; x += 6) {
+        let p1 = new MoldParticle(x, 6);
+        let p2 = new MoldParticle(x, height - 6);
+        moldParticles.push(p1); addSpatial(p1);
+        moldParticles.push(p2); addSpatial(p2);
       }
       // Left & Right edges
-      for (let y = 0; y < height; y += 10) {
-        moldParticles.push(new MoldAgent(5, y, true));
-        moldParticles.push(new MoldAgent(width - 5, y, true));
+      for (let y = 10; y < height - 10; y += 6) {
+        let p1 = new MoldParticle(6, y);
+        let p2 = new MoldParticle(width - 6, y);
+        moldParticles.push(p1); addSpatial(p1);
+        moldParticles.push(p2); addSpatial(p2);
       }
     }
 
@@ -62,24 +107,48 @@
       // 1. Layer 1: Full window light grey background
       background(235, 235, 235);
 
-      // 2. Layer 2: Mold Growth - continuous edge spawning & active agents crawling inward
-      if (moldParticles.length < 5000 && frameCount % 2 === 0) {
-        let side = floor(random(4));
-        let sx, sy, sAngle;
-        if (side === 0) { sx = random(width); sy = 0; sAngle = random(45, 135); }
-        else if (side === 1) { sx = width; sy = random(height); sAngle = random(135, 225); }
-        else if (side === 2) { sx = random(width); sy = height; sAngle = random(225, 315); }
-        else { sx = 0; sy = random(height); sAngle = random(-45, 45); }
-        moldParticles.push(new MoldAgent(sx, sy, false, sAngle));
+      // 2. Layer 2: Mold Growth - Spawns adjacent to existing particles, weighted toward center
+      if (moldParticles.length < 5500 && frameCount % 1 === 0) {
+        // Pick an existing mold particle to branch from, biased toward those closer to the center
+        let parent = null;
+        let center = createVector(width / 2, height / 2);
+        
+        // Try a few random picks and choose the one closer to center to create directional growth
+        for (let attempt = 0; attempt < 5; attempt++) {
+          let candidate = random(moldParticles);
+          if (candidate) {
+            if (!parent || dist(candidate.x, candidate.y, center.x, center.y) < dist(parent.x, parent.y, center.x, center.y)) {
+              parent = candidate;
+            }
+          }
+        }
+
+        if (parent) {
+          // Angle pointing from parent towards center + slight variation
+          let centerAngle = atan2(center.y - parent.y, center.x - parent.x);
+          let angle = centerAngle + random(-35, 35);
+          let stepDist = 5.5; // Adjacent spacing distance
+          let nx = parent.x + cos(angle) * stepDist;
+          let ny = parent.y + sin(angle) * stepDist;
+
+          // Ensure within screen bounds and strictly non-overlapping
+          let dCenter = dist(nx, ny, center.x, center.y);
+          if (nx > 15 && nx < width - 15 && ny > 15 && ny < height - 15 && dCenter < min(width, height) * 0.48) {
+            if (!checkOverlap(nx, ny, 3.8)) {
+              let newP = new MoldParticle(nx, ny);
+              moldParticles.push(newP);
+              addSpatial(newP);
+            }
+          }
+        }
       }
 
-      // Update & Render active Mold Agents creeping toward center
+      // Render Mold Particles
       noStroke();
       fill(100, 190, 80, 220);
-      for (let i = moldParticles.length - 1; i >= 0; i--) {
+      for (let i = 0; i < moldParticles.length; i++) {
         let p = moldParticles[i];
-        p.update();
-        p.display();
+        circle(p.x, p.y, 3.5);
       }
 
       // Draw Pink Dot Snacks spawned by user tapping
@@ -106,52 +175,10 @@
       }
     }
 
-    // Mold Agent Class (Crawls actively inward from edges into strands)
-    class MoldAgent {
-      constructor(x, y, isEdgeAnchor, customAngle = null) {
+    class MoldParticle {
+      constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.isEdgeAnchor = isEdgeAnchor;
-        
-        if (isEdgeAnchor) {
-          this.vx = 0;
-          this.vy = 0;
-        } else {
-          let centerAngle = customAngle !== null ? customAngle : atan2(height / 2 - y, width / 2 - x) + random(-20, 20);
-          let speed = random(0.6, 1.2);
-          this.vx = cos(centerAngle) * speed;
-          this.vy = sin(centerAngle) * speed;
-        }
-      }
-
-      update() {
-        if (!this.isEdgeAnchor) {
-          this.x += this.vx;
-          this.y += this.vy;
-
-          // Slight organic wiggle toward center
-          let centerAngle = atan2(height / 2 - this.y, width / 2 - this.x);
-          this.vx += cos(centerAngle) * 0.05;
-          this.vy += sin(centerAngle) * 0.05;
-          
-          let currentSpeed = sqrt(this.vx * this.vx + this.vy * this.vy);
-          if (currentSpeed > 1.5) {
-            this.vx = (this.vx / currentSpeed) * 1.5;
-            this.vy = (this.vy / currentSpeed) * 1.5;
-          }
-
-          // If it reaches near center or window borders, anchor/stop
-          let dCenter = dist(this.x, this.y, width / 2, height / 2);
-          if (dCenter < 80 || this.x < 10 || this.x > width - 10 || this.y < 10 || this.y > height - 10) {
-            this.isEdgeAnchor = true;
-            this.vx = 0;
-            this.vy = 0;
-          }
-        }
-      }
-
-      display() {
-        circle(this.x, this.y, 3.5);
       }
     }
 
@@ -303,7 +330,9 @@
 
         // Eat Mold Particles
         for (let i = moldParticles.length - 1; i >= 0; i--) {
-          if (dist(nextHead.x, nextHead.y, moldParticles[i].x, moldParticles[i].y) < 16) {
+          let p = moldParticles[i];
+          if (dist(nextHead.x, nextHead.y, p.x, p.y) < 16) {
+            removeSpatial(p);
             moldParticles.splice(i, 1);
           }
         }
