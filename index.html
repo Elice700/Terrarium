@@ -48,13 +48,13 @@
       moldParticles = [];
       // Top & Bottom edges
       for (let x = 0; x < width; x += 10) {
-        moldParticles.push({ x: x, y: 5, isEdge: true });
-        moldParticles.push({ x: x, y: height - 5, isEdge: true });
+        moldParticles.push(new MoldAgent(x, 5, true));
+        moldParticles.push(new MoldAgent(x, height - 5, true));
       }
       // Left & Right edges
       for (let y = 0; y < height; y += 10) {
-        moldParticles.push({ x: 5, y: y, isEdge: true });
-        moldParticles.push({ x: width - 5, y: y, isEdge: true });
+        moldParticles.push(new MoldAgent(5, y, true));
+        moldParticles.push(new MoldAgent(width - 5, y, true));
       }
     }
 
@@ -62,38 +62,24 @@
       // 1. Layer 1: Full window light grey background
       background(235, 235, 235);
 
-      // 2. Layer 2: Mold Growth - Continuous edge spawning and active inward stacking strands
-      if (moldParticles.length < 6000) {
-        // Spawn on screen edges at a slow/steady pace
+      // 2. Layer 2: Mold Growth - continuous edge spawning & active agents crawling inward
+      if (moldParticles.length < 5000 && frameCount % 2 === 0) {
         let side = floor(random(4));
-        let sx, sy;
-        if (side === 0) { sx = random(width); sy = random(0, 6); }
-        else if (side === 1) { sx = random(width); sy = height - random(0, 6); }
-        else if (side === 2) { sx = random(0, 6); sy = random(height); }
-        else { sx = width - random(0, 6); sy = random(height); }
-        moldParticles.push({ x: sx, y: sy, isEdge: true });
-
-        // Branch and stack inward from existing mold nodes to form active growing strands
-        let parent = random(moldParticles);
-        if (parent) {
-          let centerAngle = atan2(height / 2 - parent.y, width / 2 - parent.x);
-          let angle = centerAngle + random(-20, 20);
-          let nx = parent.x + cos(angle) * 4;
-          let ny = parent.y + sin(angle) * 4;
-
-          // Keep within window bounds while stacking inward toward center
-          if (nx > 20 && nx < width - 20 && ny > 20 && ny < height - 20) {
-            moldParticles.push({ x: nx, y: ny, isEdge: false });
-          }
-        }
+        let sx, sy, sAngle;
+        if (side === 0) { sx = random(width); sy = 0; sAngle = random(45, 135); }
+        else if (side === 1) { sx = width; sy = random(height); sAngle = random(135, 225); }
+        else if (side === 2) { sx = random(width); sy = height; sAngle = random(225, 315); }
+        else { sx = 0; sy = random(height); sAngle = random(-45, 45); }
+        moldParticles.push(new MoldAgent(sx, sy, false, sAngle));
       }
 
-      // Render Mold Particles
+      // Update & Render active Mold Agents creeping toward center
       noStroke();
       fill(100, 190, 80, 220);
-      for (let i = 0; i < moldParticles.length; i++) {
+      for (let i = moldParticles.length - 1; i >= 0; i--) {
         let p = moldParticles[i];
-        circle(p.x, p.y, 3.5);
+        p.update();
+        p.display();
       }
 
       // Draw Pink Dot Snacks spawned by user tapping
@@ -117,6 +103,55 @@
         if (hp.isDead()) {
           heartParticles.splice(i, 1);
         }
+      }
+    }
+
+    // Mold Agent Class (Crawls actively inward from edges into strands)
+    class MoldAgent {
+      constructor(x, y, isEdgeAnchor, customAngle = null) {
+        this.x = x;
+        this.y = y;
+        this.isEdgeAnchor = isEdgeAnchor;
+        
+        if (isEdgeAnchor) {
+          this.vx = 0;
+          this.vy = 0;
+        } else {
+          let centerAngle = customAngle !== null ? customAngle : atan2(height / 2 - y, width / 2 - x) + random(-20, 20);
+          let speed = random(0.6, 1.2);
+          this.vx = cos(centerAngle) * speed;
+          this.vy = sin(centerAngle) * speed;
+        }
+      }
+
+      update() {
+        if (!this.isEdgeAnchor) {
+          this.x += this.vx;
+          this.y += this.vy;
+
+          // Slight organic wiggle toward center
+          let centerAngle = atan2(height / 2 - this.y, width / 2 - this.x);
+          this.vx += cos(centerAngle) * 0.05;
+          this.vy += sin(centerAngle) * 0.05;
+          
+          let currentSpeed = sqrt(this.vx * this.vx + this.vy * this.vy);
+          if (currentSpeed > 1.5) {
+            this.vx = (this.vx / currentSpeed) * 1.5;
+            this.vy = (this.vy / currentSpeed) * 1.5;
+          }
+
+          // If it reaches near center or window borders, anchor/stop
+          let dCenter = dist(this.x, this.y, width / 2, height / 2);
+          if (dCenter < 80 || this.x < 10 || this.x > width - 10 || this.y < 10 || this.y > height - 10) {
+            this.isEdgeAnchor = true;
+            this.vx = 0;
+            this.vy = 0;
+          }
+        }
+      }
+
+      display() {
+        circle(this.x, this.y, 3.5);
       }
     }
 
