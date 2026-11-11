@@ -3,632 +3,796 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Terrarium</title>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+
 <style>
-html,body{margin:0;padding:0;overflow:hidden;background:#d1ecf0;touch-action:none}
-canvas{display:block}
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #d1ecf0;
+    touch-action: manipulation;
+  }
+
+  canvas {
+    display: block;
+    touch-action: manipulation;
+  }
 </style>
 </head>
+
 <body>
 <script>
-let mold=[];
-let growthParents=[];
-let pinkFood=[];
-let hearts=[];
+let mold = [];
+let pinkFood = [];
+let hearts = [];
 let lizard;
-let lastGrowth=0;
 
-const MAX_MOLD=1600;
-const GROWTH_INTERVAL=180;
+let moldRadius;
+let moldSpacing;
+let lastGrowth = 0;
+let nextFoodId = 0;
 
-// --------------------------------------------------
-// MAIN
-// --------------------------------------------------
+const BACKGROUND = "#d1ecf0";
+const MAX_MOLD = 1800;
 
-function setup(){
-  createCanvas(windowWidth,windowHeight);
+function setup() {
+  createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
+
+  calculateDimensions();
   seedMold();
-  lizard=new Lizard();
+
+  lizard = new Lizard();
 }
 
-function draw(){
-  background(112,115,111);
+function calculateDimensions() {
+  const s = min(width, height);
 
-  updateMoldGrowth();
-  drawMold();
+  moldRadius = s * 0.008;
+  moldSpacing = s * 0.028;
+}
 
-  for(const p of pinkFood){
-    noStroke();
-    fill(255,130,185);
-    circle(p.x,p.y,p.r*2);
-    fill(255,220,235,150);
-    circle(p.x-p.r*.25,p.y-p.r*.25,p.r*.7);
-  }
+function draw() {
+  background(BACKGROUND);
+
+  growMold();
+  updateMold();
+  updatePinkFood();
+  updateHearts();
 
   lizard.update();
   lizard.draw();
-
-  for(let i=hearts.length-1;i>=0;i--){
-    hearts[i].update();
-    hearts[i].draw();
-    if(hearts[i].life<=0)hearts.splice(i,1);
-  }
 }
 
 // --------------------------------------------------
 // MOLD
 // --------------------------------------------------
 
-class MoldParticle{
-  constructor(x,y,r,initial=false){
-    this.x=x;
-    this.y=y;
-    this.r=r;
-    this.children=0;
-    this.alive=true;
-    this.initial=initial;
+class MoldParticle {
+  constructor(x, y, initial = false) {
+    this.pos = createVector(x, y);
+    this.initial = initial;
+    this.radius = moldRadius * random(0.75, 1.3);
+
+    this.alive = true;
+    this.growthCount = 0;
+    this.lastGrowth = 0;
+
+    this.shade = random(-15, 15);
+    this.wobble = random(TWO_PI);
+  }
+
+  draw() {
+    if (!this.alive) return;
+
+    const pulse = sin(frameCount * 0.025 + this.wobble) * 0.08;
+    const r = this.radius * (1 + pulse);
+
+    noStroke();
+    fill(
+      constrain(76 + this.shade, 0, 255),
+      constrain(158 + this.shade, 0, 255),
+      constrain(78 + this.shade * 0.5, 0, 255),
+      235
+    );
+
+    circle(this.pos.x, this.pos.y, r * 2);
+
+    fill(130, 195, 112, 90);
+    circle(
+      this.pos.x - r * 0.2,
+      this.pos.y - r * 0.2,
+      r * 0.65
+    );
   }
 }
 
-function seedMold(){
-  mold=[];
-  growthParents=[];
+function seedMold() {
+  mold = [];
 
-  const s=min(width,height);
-  const spacing=max(13,s*.035);
-  const radius=max(2.5,s*.009);
+  const spacing = moldSpacing * 1.25;
+  const inset = moldSpacing * 0.35;
 
-  for(let x=0;x<=width;x+=spacing){
-    addMold(x+random(-3,3),random(0,spacing*.65),radius,true);
-    addMold(x+random(-3,3),height-random(0,spacing*.65),radius,true);
+  // Top and bottom edges
+  for (let x = 0; x <= width; x += spacing) {
+    mold.push(new MoldParticle(
+      constrain(x + random(-2, 2), 0, width),
+      inset + random(-inset * 0.4, inset * 0.4),
+      true
+    ));
+
+    mold.push(new MoldParticle(
+      constrain(x + random(-2, 2), 0, width),
+      height - inset + random(-inset * 0.4, inset * 0.4),
+      true
+    ));
   }
 
-  for(let y=spacing;y<height;y+=spacing){
-    addMold(random(0,spacing*.65),y+random(-3,3),radius,true);
-    addMold(width-random(0,spacing*.65),y+random(-3,3),radius,true);
+  // Left and right edges
+  for (let y = spacing; y < height; y += spacing) {
+    mold.push(new MoldParticle(
+      inset + random(-inset * 0.4, inset * 0.4),
+      y,
+      true
+    ));
+
+    mold.push(new MoldParticle(
+      width - inset + random(-inset * 0.4, inset * 0.4),
+      y,
+      true
+    ));
   }
 }
 
-function addMold(x,y,r,initial=false){
-  x=constrain(x,0,width);
-  y=constrain(y,0,height);
+function growMold() {
+  if (mold.length >= MAX_MOLD) return;
+  if (millis() - lastGrowth < 180) return;
 
-  for(const p of mold){
-    if(dist(x,y,p.x,p.y)<(r+p.r)*.9)return null;
-  }
+  lastGrowth = millis();
 
-  const p=new MoldParticle(x,y,r,initial);
-  mold.push(p);
+  // Several attempts per growth cycle make growth reliable
+  // even when some candidate positions are blocked.
+  for (let attempt = 0; attempt < 14; attempt++) {
+    if (mold.length >= MAX_MOLD) break;
 
-  if(!initial)growthParents.push(p);
-  return p;
-}
+    const parent = random(mold);
 
-function updateMoldGrowth(){
-  if(millis()-lastGrowth<GROWTH_INTERVAL)return;
-  lastGrowth=millis();
+    if (!parent || !parent.alive) continue;
+    if (parent.growthCount >= 5) continue;
 
-  if(mold.length>=MAX_MOLD||growthParents.length===0)return;
+    const center = createVector(width / 2, height / 2);
+    const inward = p5.Vector.sub(center, parent.pos);
 
-  for(let attempt=0;attempt<5;attempt++){
-    if(!growthParents.length||mold.length>=MAX_MOLD)break;
+    if (inward.magSq() < 1) continue;
 
-    const index=floor(random(growthParents.length));
-    const parent=growthParents[index];
+    inward.normalize();
+    inward.rotate(random(-0.8, 0.8));
 
-    if(!parent.alive||parent.children>=4){
-      growthParents.splice(index,1);
-      continue;
+    const distance = moldSpacing * random(0.8, 1.15);
+    const candidate = p5.Vector.add(
+      parent.pos,
+      p5.Vector.mult(inward, distance)
+    );
+
+    // Keep the new particle inside the viewport.
+    const edgePadding = moldRadius * 1.5;
+
+    if (
+      candidate.x < edgePadding ||
+      candidate.x > width - edgePadding ||
+      candidate.y < edgePadding ||
+      candidate.y > height - edgePadding
+    ) continue;
+
+    // Growth must move toward the centre.
+    const oldDistance = dist(
+      parent.pos.x, parent.pos.y,
+      center.x, center.y
+    );
+
+    const newDistance = dist(
+      candidate.x, candidate.y,
+      center.x, center.y
+    );
+
+    if (newDistance >= oldDistance) continue;
+
+    // Avoid placing particles directly on top of each other.
+    let crowded = false;
+
+    for (let i = 0; i < mold.length; i++) {
+      const other = mold[i];
+
+      if (!other.alive) continue;
+
+      if (p5.Vector.dist(candidate, other.pos) <
+          moldRadius * 2.1) {
+        crowded = true;
+        break;
+      }
     }
 
-    const cx=width/2;
-    const cy=height/2;
-    const dx=cx-parent.x;
-    const dy=cy-parent.y;
-    const d=Math.hypot(dx,dy);
+    if (crowded) continue;
 
-    if(d<min(width,height)*.025){
-      growthParents.splice(index,1);
-      continue;
-    }
+    mold.push(new MoldParticle(
+      candidate.x,
+      candidate.y,
+      false
+    ));
 
-    const inward=Math.atan2(dy,dx);
-    const angle=inward+random(-1.05,1.05);
-    const step=parent.r*random(1.8,2.7);
-
-    const nx=parent.x+Math.cos(angle)*step;
-    const ny=parent.y+Math.sin(angle)*step;
-
-    if(nx<0||nx>width||ny<0||ny>height)continue;
-    if(dist(nx,ny,cx,cy)>=d-1)continue;
-
-    const child=addMold(nx,ny,parent.r*random(.82,1.08));
-
-    if(child)parent.children++;
+    parent.growthCount++;
   }
 }
 
-function drawMold(){
-  noStroke();
-
-  for(const p of mold){
-    fill(57,145+random(-7,7),65);
-    circle(p.x,p.y,p.r*2);
-
-    fill(125,195,100,100);
-    circle(p.x-p.r*.2,p.y-p.r*.2,p.r*.7);
+function updateMold() {
+  for (const particle of mold) {
+    particle.draw();
   }
+}
+
+// --------------------------------------------------
+// PINK FOOD
+// --------------------------------------------------
+
+class PinkParticle {
+  constructor(x, y) {
+    this.pos = createVector(x, y);
+    this.radius = moldRadius * random(1.3, 1.8);
+    this.id = nextFoodId++;
+    this.alive = true;
+    this.wobble = random(TWO_PI);
+  }
+
+  draw() {
+    if (!this.alive) return;
+
+    const pulse = 1 + sin(frameCount * 0.06 + this.wobble) * 0.1;
+
+    noStroke();
+    fill(255, 115, 174, 235);
+    circle(this.pos.x, this.pos.y, this.radius * 2 * pulse);
+
+    fill(255, 205, 225, 180);
+    circle(
+      this.pos.x - this.radius * 0.25,
+      this.pos.y - this.radius * 0.25,
+      this.radius * 0.65
+    );
+  }
+}
+
+function spawnPinkFood(x, y) {
+  pinkFood.push(new PinkParticle(x, y));
+}
+
+function updatePinkFood() {
+  for (const food of pinkFood) {
+    food.draw();
+  }
+
+  pinkFood = pinkFood.filter(food => food.alive);
+}
+
+// --------------------------------------------------
+// HEARTS
+// --------------------------------------------------
+
+class Heart {
+  constructor(x, y) {
+    this.pos = createVector(x, y);
+    this.vel = createVector(random(-0.5, 0.5), random(-1.8, -0.8));
+    this.life = 255;
+    this.size = random(12, 21);
+  }
+
+  update() {
+    this.pos.add(this.vel);
+    this.vel.mult(0.985);
+    this.life -= 3;
+  }
+
+  draw() {
+    push();
+    translate(this.pos.x, this.pos.y);
+    noStroke();
+    fill(255, 105, 155, this.life);
+    textAlign(CENTER, CENTER);
+    textSize(this.size);
+    text("♥", 0, 0);
+    pop();
+  }
+}
+
+function updateHearts() {
+  for (const heart of hearts) {
+    heart.update();
+    heart.draw();
+  }
+
+  hearts = hearts.filter(h => h.life > 0);
 }
 
 // --------------------------------------------------
 // LIZARD
 // --------------------------------------------------
 
-class Lizard{
-  constructor(){
-    this.scale=min(width,height);
-    this.radius=this.scale*.018;
-    this.speed=this.scale*.0045;
-    this.turnSpeed=.045;
+class Lizard {
+  constructor() {
+    this.scale = min(width, height);
 
-    // Protected movement rectangle.
-    // The margin accounts for the full body length,
-    // the initial particles and a safety gap.
-    this.margin=this.scale*.03;
+    // Requested margin: 3% of the shorter screen dimension.
+    this.margin = this.scale * 0.03;
 
-    this.x=width/2;
-    this.y=height/2;
-    this.angle=random(TWO_PI);
+    this.bodyRadius = this.scale * 0.012;
+    this.segmentSpacing = this.scale * 0.006;
+    this.segmentCount = 7;
 
-    this.bodyLength=10;
-    this.spacing=this.radius*.55;
+    this.speed = this.scale * 0.0032;
+    this.turnSpeed = 0.085;
 
-    this.history=[];
-    for(let i=0;i<200;i++){
-      this.history.push({
-        x:this.x-Math.cos(this.angle)*i,
-        y:this.y-Math.sin(this.angle)*i
-      });
+    this.pos = createVector(
+      width * 0.5,
+      height * 0.5
+    );
+
+    this.heading = random(TWO_PI);
+    this.velocity = p5.Vector.fromAngle(this.heading);
+
+    this.history = [];
+    for (let i = 0; i < 300; i++) {
+      this.history.push(this.pos.copy());
     }
 
-    this.patrol=[];
-    this.patrolIndex=0;
-    this.makePatrol();
+    this.target = null;
+    this.targetType = null;
+    this.targetStarted = 0;
+    this.abandoned = new WeakSet();
 
-    this.target=null;
-    this.targetStart=0;
-    this.abandoned=new WeakSet();
+    this.patrolPoints = [];
+    this.patrolIndex = 0;
+    this.createPatrol();
 
-    this.legPhase=0;
+    this.legPhase = 0;
+    this.blinkTimer = 0;
+    this.eyeBlink = false;
   }
 
-  bounds(){
-    return {
-      left:this.margin,
-      right:width-this.margin,
-      top:this.margin,
-      bottom:height-this.margin
-    };
-  }
+  createPatrol() {
+    this.patrolPoints = [];
 
-  makePatrol(){
-    this.patrol=[];
+    const m = this.margin;
+    const usableW = max(1, width - m * 2);
+    const usableH = max(1, height - m * 2);
 
-    const b=this.bounds();
-    const cols=max(3,ceil((b.right-b.left)/(this.scale*.34)));
-    const rows=max(3,ceil((b.bottom-b.top)/(this.scale*.34)));
+    const cols = 4;
+    const rows = 4;
 
-    const xs=[];
-    const ys=[];
+    // A serpentine route covers the whole screen.
+    for (let row = 0; row < rows; row++) {
+      const y = m + usableH * (row / (rows - 1));
 
-    for(let i=0;i<cols;i++){
-      xs.push(lerp(b.left,b.right,i/(cols-1)));
-    }
-
-    for(let i=0;i<rows;i++){
-      ys.push(lerp(b.top,b.bottom,i/(rows-1)));
-    }
-
-    // Serpentine coverage of the entire safe area.
-    for(let r=0;r<rows;r++){
-      const row=r%2===0?xs:[...xs].reverse();
-
-      for(const x of row){
-        this.patrol.push({
-          x:x+random(-this.scale*.012,this.scale*.012),
-          y:ys[r]+random(-this.scale*.012,this.scale*.012)
-        });
-      }
-    }
-
-    this.patrolIndex=0;
-  }
-
-  get waypoint(){
-    return this.patrol[this.patrolIndex];
-  }
-
-  advancePatrol(){
-    this.patrolIndex++;
-
-    if(this.patrolIndex>=this.patrol.length){
-      this.makePatrol();
-    }
-  }
-
-  // Never select the original edge particles.
-  // Only pursue newer mold inside the protected area.
-  findLocalFood(){
-    const b=this.bounds();
-    const radius=this.scale*.22;
-
-    let best=null;
-    let bestScore=Infinity;
-
-    const cx=width/2;
-    const cy=height/2;
-
-    for(const p of mold){
-      if(!p.alive||p.initial||this.abandoned.has(p))continue;
-
-      if(p.x<b.left||p.x>b.right||p.y<b.top||p.y>b.bottom)continue;
-
-      const travel=dist(this.x,this.y,p.x,p.y);
-      if(travel>radius)continue;
-
-      const centerDistance=dist(p.x,p.y,cx,cy);
-      const score=centerDistance*.75+travel*.25;
-
-      if(score<bestScore){
-        best=p;
-        bestScore=score;
-      }
-    }
-
-    if(!best){
-      for(const p of pinkFood){
-        const travel=dist(this.x,this.y,p.x,p.y);
-        if(travel>radius)continue;
-
-        const centerDistance=dist(p.x,p.y,cx,cy);
-        const score=centerDistance*.75+travel*.25;
-
-        if(score<bestScore){
-          best=p;
-          bestScore=score;
+      if (row % 2 === 0) {
+        for (let col = 0; col < cols; col++) {
+          const x = m + usableW * (col / (cols - 1));
+          this.patrolPoints.push(createVector(x, y));
+        }
+      } else {
+        for (let col = cols - 1; col >= 0; col--) {
+          const x = m + usableW * (col / (cols - 1));
+          this.patrolPoints.push(createVector(x, y));
         }
       }
     }
 
-    if(best){
-      this.target=best;
-      this.targetStart=millis();
-    }
+    this.patrolIndex = 0;
   }
 
-  checkTarget(){
-    if(!this.target)return;
-
-    const isMold=this.target instanceof MoldParticle;
-    const exists=isMold
-      ?this.target.alive&&mold.includes(this.target)
-      :pinkFood.includes(this.target);
-
-    if(!exists){
-      this.target=null;
-      return;
+  patrolTarget() {
+    if (this.patrolPoints.length === 0) {
+      return createVector(width / 2, height / 2);
     }
 
-    if(millis()-this.targetStart>3000){
-      if(isMold)this.abandoned.add(this.target);
-      this.target=null;
+    let target = this.patrolPoints[this.patrolIndex];
+
+    if (p5.Vector.dist(this.pos, target) < this.scale * 0.045) {
+      this.patrolIndex =
+        (this.patrolIndex + 1) % this.patrolPoints.length;
+
+      target = this.patrolPoints[this.patrolIndex];
     }
+
+    return target.copy();
   }
 
-  turnToward(tx,ty){
-    const desired=Math.atan2(ty-this.y,tx-this.x);
+  findFood() {
+    const localRadius = this.scale * 0.22;
+    let best = null;
+    let bestType = null;
+    let bestScore = Infinity;
 
-    let difference=desired-this.angle;
-    while(difference>PI)difference-=TWO_PI;
-    while(difference<-PI)difference+=TWO_PI;
+    // Newly grown green particles are edible.
+    // Original edge particles are deliberately excluded.
+    for (const particle of mold) {
+      if (!particle.alive || particle.initial) continue;
+      if (this.abandoned.has(particle)) continue;
 
-    this.angle+=constrain(difference,-this.turnSpeed,this.turnSpeed);
-  }
+      const distance = p5.Vector.dist(this.pos, particle.pos);
+      if (distance > localRadius) continue;
 
-  move(){
-    const b=this.bounds();
+      const centreDistance = dist(
+        particle.pos.x,
+        particle.pos.y,
+        width / 2,
+        height / 2
+      );
 
-    let nx=this.x+Math.cos(this.angle)*this.speed;
-    let ny=this.y+Math.sin(this.angle)*this.speed;
+      const score =
+        distance * 0.25 +
+        centreDistance * 0.75;
 
-    // Hard boundary enforcement with reflection.
-    // The lizard cannot drift or turn its way off-screen.
-    if(nx<b.left||nx>b.right){
-      this.angle=PI-this.angle;
-      nx=this.x+Math.cos(this.angle)*this.speed;
-    }
-
-    if(ny<b.top||ny>b.bottom){
-      this.angle=-this.angle;
-      ny=this.y+Math.sin(this.angle)*this.speed;
-    }
-
-    this.x=constrain(nx,b.left,b.right);
-    this.y=constrain(ny,b.top,b.bottom);
-
-    this.history.unshift({x:this.x,y:this.y});
-
-    const maxHistory=500;
-    if(this.history.length>maxHistory)this.history.length=maxHistory;
-  }
-
-  bodyPoints(){
-    const points=[{x:this.x,y:this.y}];
-    let accumulated=0;
-    let segmentIndex=0;
-
-    for(let i=1;i<this.history.length;i++){
-      const a=this.history[i-1];
-      const b=this.history[i];
-      const d=dist(a.x,a.y,b.x,b.y);
-      accumulated+=d;
-
-      while(segmentIndex<this.bodyLength&&accumulated>=this.spacing){
-        const excess=accumulated-this.spacing;
-        const t=d>0?constrain(excess/d,0,1):0;
-
-        points.push({
-          x:lerp(b.x,a.x,t),
-          y:lerp(b.y,a.y,t)
-        });
-
-        segmentIndex++;
-        accumulated-=this.spacing;
+      if (score < bestScore) {
+        best = particle;
+        bestType = "mold";
+        bestScore = score;
       }
-
-      if(segmentIndex>=this.bodyLength)break;
     }
 
-    return points;
-  }
+    // Pink food is a secondary target.
+    for (const food of pinkFood) {
+      if (!food.alive || this.abandoned.has(food)) continue;
 
-  eat(){
-    if(!this.target)return;
+      const distance = p5.Vector.dist(this.pos, food.pos);
+      if (distance > localRadius) continue;
 
-    if(dist(this.x,this.y,this.target.x,this.target.y)<this.radius*1.4){
-      if(this.target instanceof MoldParticle){
-        const eaten=this.target;
-        eaten.alive=false;
-        mold=mold.filter(p=>p!==eaten);
-        growthParents=growthParents.filter(p=>p!==eaten);
-      }else{
-        pinkFood=pinkFood.filter(p=>p!==this.target);
+      const score = distance + this.scale * 0.12;
+
+      if (score < bestScore) {
+        best = food;
+        bestType = "pink";
+        bestScore = score;
       }
+    }
 
-      this.target=null;
+    return best ? { item: best, type: bestType } : null;
+  }
+
+  chooseTarget() {
+    // Abandon targets that take too long.
+    if (
+      this.target &&
+      millis() - this.targetStarted > 3000
+    ) {
+      this.abandoned.add(this.target);
+      this.target = null;
+      this.targetType = null;
+    }
+
+    if (this.target) {
+      if (!this.target.alive) {
+        this.target = null;
+        this.targetType = null;
+      }
+    }
+
+    if (!this.target) {
+      const found = this.findFood();
+
+      if (found) {
+        this.target = found.item;
+        this.targetType = found.type;
+        this.targetStarted = millis();
+      }
     }
   }
 
-  update(){
-    this.checkTarget();
+  update() {
+    this.chooseTarget();
 
-    const wp=this.waypoint;
-    if(!wp)return;
+    let destination = this.patrolTarget();
 
-    if(!this.target)this.findLocalFood();
-
-    let destination=this.target||wp;
-    const b=this.bounds();
-
-    // Even food targets are clipped to the safe movement area.
-    const tx=constrain(destination.x,b.left,b.right);
-    const ty=constrain(destination.y,b.top,b.bottom);
-
-    this.turnToward(tx,ty);
-
-    // Advance patrol even when food is present.
-    if(!this.target&&dist(this.x,this.y,wp.x,wp.y)<this.scale*.06){
-      this.advancePatrol();
+    // Food causes a local detour, but does not replace patrol.
+    if (this.target) {
+      destination = this.target.pos.copy();
     }
 
-    this.move();
-    this.legPhase+=.18;
-    this.eat();
+    const desired = p5.Vector.sub(destination, this.pos);
+
+    if (desired.magSq() > 0.001) {
+      desired.normalize();
+
+      const current = p5.Vector.fromAngle(this.heading);
+      current.lerp(desired, this.turnSpeed);
+      current.normalize();
+
+      this.heading = current.heading();
+    }
+
+    this.velocity = p5.Vector.fromAngle(this.heading);
+    this.velocity.mult(this.speed);
+
+    this.pos.add(this.velocity);
+
+    // Hard viewport boundaries. The whole body history is also
+    // constrained when drawn, so no segment can wander offscreen.
+    this.pos.x = constrain(
+      this.pos.x,
+      this.margin,
+      width - this.margin
+    );
+
+    this.pos.y = constrain(
+      this.pos.y,
+      this.margin,
+      height - this.margin
+    );
+
+    this.history.unshift(this.pos.copy());
+
+    const maxHistory = 300;
+    if (this.history.length > maxHistory) {
+      this.history.length = maxHistory;
+    }
+
+    this.legPhase += 0.22;
+
+    this.checkEating();
   }
 
-  draw(){
-    const body=this.bodyPoints();
-    if(body.length<2)return;
+  checkEating() {
+    if (!this.target) return;
 
-    push();
+    const reach = this.bodyRadius * 1.8;
 
-    // Smooth body silhouette.
+    if (p5.Vector.dist(this.pos, this.target.pos) < reach) {
+      this.target.alive = false;
+      this.target = null;
+      this.targetType = null;
+    }
+  }
+
+  bodyPoint(index) {
+    const historyIndex = Math.floor(
+      index * this.segmentSpacing / max(1, this.speed)
+    );
+
+    const p = this.history[
+      min(historyIndex, this.history.length - 1)
+    ] || this.pos;
+
+    return createVector(
+      constrain(p.x, this.margin, width - this.margin),
+      constrain(p.y, this.margin, height - this.margin)
+    );
+  }
+
+  draw() {
+    const points = [];
+
+    for (let i = 0; i <= this.segmentCount * 2; i++) {
+      points.push(this.bodyPoint(i * 0.5));
+    }
+
+    // Body
     noFill();
-    stroke(203,119,68);
-    strokeWeight(this.radius*1.45);
+    stroke(224, 139, 61);
+    strokeWeight(this.bodyRadius * 1.75);
     strokeCap(ROUND);
     strokeJoin(ROUND);
 
     beginShape();
-    curveVertex(body[body.length-1].x,body[body.length-1].y);
-    for(const p of body)curveVertex(p.x,p.y);
-    curveVertex(body[0].x,body[0].y);
+    curveVertex(points[0].x, points[0].y);
+
+    for (const p of points) {
+      curveVertex(p.x, p.y);
+    }
+
+    const last = points[points.length - 1];
+    curveVertex(last.x, last.y);
     endShape();
 
-    // Dorsal highlight.
-    stroke(240,171,111,150);
-    strokeWeight(this.radius*.23);
+    // Body highlights
+    noFill();
+    stroke(255, 190, 104, 170);
+    strokeWeight(this.bodyRadius * 0.35);
+
     beginShape();
-    for(let i=1;i<body.length-1;i++){
-      curveVertex(body[i].x,body[i].y);
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      curveVertex(p.x, p.y - this.bodyRadius * 0.35);
     }
     endShape();
 
-    // Animated legs.
-    for(const index of [3,7]){
-      const p=body[index];
-      const next=body[index-1];
-      if(!p||!next)continue;
+    // Legs
+    this.drawLegs(points);
 
-      const direction=Math.atan2(next.y-p.y,next.x-p.x);
-      const swing=Math.sin(this.legPhase+index)*this.radius*.45;
+    // Head
+    this.drawHead();
+  }
 
-      for(const side of [-1,1]){
-        const baseX=p.x+Math.cos(direction+HALF_PI)*this.radius*.35*side;
-        const baseY=p.y+Math.sin(direction+HALF_PI)*this.radius*.35*side;
-        const legAngle=direction+side*.85;
+  drawLegs(points) {
+    const legIndices = [3, 8, 13];
 
-        const endX=baseX+Math.cos(legAngle)*this.radius*1.1+swing;
-        const endY=baseY+Math.sin(legAngle)*this.radius*1.1;
+    for (let i = 0; i < legIndices.length; i++) {
+      const index = legIndices[i];
+      if (index >= points.length) continue;
 
-        stroke(184,105,65);
-        strokeWeight(this.radius*.28);
-        line(baseX,baseY,endX,endY);
+      const p = points[index];
+      const wave = sin(this.legPhase + i * 1.7);
 
-        line(
-          endX,endY,
-          endX+Math.cos(legAngle+side*.5)*this.radius*.4,
-          endY+Math.sin(legAngle+side*.5)*this.radius*.4
-        );
-      }
+      const side = i % 2 === 0 ? 1 : -1;
+
+      const angle = this.heading + HALF_PI * side;
+      const forward = p5.Vector.fromAngle(
+        this.heading + wave * 0.45
+      );
+
+      const outward = p5.Vector.fromAngle(angle);
+      outward.mult(this.bodyRadius * 1.35);
+
+      const foot = p5.Vector.add(p, outward);
+      foot.add(p5.Vector.mult(forward, wave * this.bodyRadius));
+
+      const knee = p5.Vector.add(p, outward.copy().mult(0.55));
+
+      stroke(195, 112, 53);
+      strokeWeight(this.bodyRadius * 0.38);
+      strokeCap(ROUND);
+
+      line(p.x, p.y, knee.x, knee.y);
+      line(knee.x, knee.y, foot.x, foot.y);
+
+      noStroke();
+      fill(195, 112, 53);
+      circle(foot.x, foot.y, this.bodyRadius * 0.42);
     }
-
-    // Head.
-    translate(this.x,this.y);
-    rotate(this.angle);
-
-    noStroke();
-    fill(224,139,83);
-    ellipse(0,0,this.radius*2.7,this.radius*2);
-
-    fill(239,164,105);
-    ellipse(this.radius*.85,0,this.radius,this.radius*.95);
-
-    fill(42,37,30);
-    circle(this.radius*.15,-this.radius*.55,this.radius*.38);
-    circle(this.radius*.15,this.radius*.55,this.radius*.38);
-
-    fill(255);
-    circle(this.radius*.21,-this.radius*.59,this.radius*.13);
-    circle(this.radius*.21,this.radius*.51,this.radius*.13);
-
-    pop();
   }
 
-  containsPoint(x,y){
-    return dist(x,y,this.x,this.y)<this.radius*2.3;
-  }
-
-  resize(){
-    this.scale=min(width,height);
-    this.radius=this.scale*.018;
-    this.speed=this.scale*.0045;
-    this.spacing=this.radius*.55;
-    this.margin=this.scale*.03;
-
-    this.target=null;
-    this.abandoned=new WeakSet();
-    this.makePatrol();
-  }
-}
-
-// --------------------------------------------------
-// HEARTS AND INTERACTION
-// --------------------------------------------------
-
-class Heart{
-  constructor(x,y){
-    this.x=x;
-    this.y=y;
-    this.vx=random(-.8,.8);
-    this.vy=random(-1.8,-.6);
-    this.life=65;
-    this.size=random(12,19);
-  }
-
-  update(){
-    this.x+=this.vx;
-    this.y+=this.vy;
-    this.vy-=.012;
-    this.life--;
-  }
-
-  draw(){
+  drawHead() {
     push();
+    translate(this.pos.x, this.pos.y);
+    rotate(this.heading);
+
+    // Neck
     noStroke();
-    fill(255,105,160,map(this.life,0,65,0,230));
-    textAlign(CENTER,CENTER);
-    textSize(this.size);
-    text("♥",this.x,this.y);
+    fill(224, 139, 61);
+    ellipse(-this.bodyRadius * 0.35, 0,
+      this.bodyRadius * 1.8,
+      this.bodyRadius * 1.35);
+
+    // Head shape
+    fill(237, 157, 76);
+    ellipse(
+      this.bodyRadius * 0.45,
+      0,
+      this.bodyRadius * 2.2,
+      this.bodyRadius * 1.65
+    );
+
+    // Snout
+    fill(245, 177, 91);
+    ellipse(
+      this.bodyRadius * 1.25,
+      0,
+      this.bodyRadius * 1.1,
+      this.bodyRadius * 0.9
+    );
+
+    // Eyes
+    fill(255);
+    circle(
+      this.bodyRadius * 0.4,
+      -this.bodyRadius * 0.48,
+      this.bodyRadius * 0.62
+    );
+
+    circle(
+      this.bodyRadius * 0.4,
+      this.bodyRadius * 0.48,
+      this.bodyRadius * 0.62
+    );
+
+    fill(45, 40, 35);
+    circle(
+      this.bodyRadius * 0.55,
+      -this.bodyRadius * 0.48,
+      this.bodyRadius * 0.27
+    );
+
+    circle(
+      this.bodyRadius * 0.55,
+      this.bodyRadius * 0.48,
+      this.bodyRadius * 0.27
+    );
+
+    // Tiny nostril
+    fill(130, 77, 43);
+    circle(
+      this.bodyRadius * 1.55,
+      -this.bodyRadius * 0.12,
+      this.bodyRadius * 0.12
+    );
+
     pop();
   }
-}
 
-function interact(x,y){
-  if(lizard.containsPoint(x,y)){
-    for(let i=0;i<5;i++){
-      hearts.push(new Heart(x+random(-10,10),y+random(-8,8)));
+  resize() {
+    this.scale = min(width, height);
+
+    // Requested 3% margin, updated after screen rotation/resizing.
+    this.margin = this.scale * 0.03;
+
+    this.bodyRadius = this.scale * 0.012;
+    this.segmentSpacing = this.scale * 0.006;
+    this.speed = this.scale * 0.0032;
+
+    this.pos.x = constrain(this.pos.x, this.margin, width - this.margin);
+    this.pos.y = constrain(this.pos.y, this.margin, height - this.margin);
+
+    this.target = null;
+    this.targetType = null;
+
+    this.history = [];
+    for (let i = 0; i < 300; i++) {
+      this.history.push(this.pos.copy());
     }
-  }else{
-    pinkFood.push({
-      x,y,
-      r:min(width,height)*.012
-    });
+
+    this.createPatrol();
   }
 }
 
-function mousePressed(){
-  interact(mouseX,mouseY);
+// --------------------------------------------------
+// INTERACTION
+// --------------------------------------------------
+
+function handleTap(x, y) {
+  if (!lizard) return;
+
+  const headDistance = dist(
+    x, y,
+    lizard.pos.x,
+    lizard.pos.y
+  );
+
+  if (headDistance < lizard.bodyRadius * 3.5) {
+    for (let i = 0; i < 5; i++) {
+      hearts.push(new Heart(
+        lizard.pos.x + random(-12, 12),
+        lizard.pos.y - random(5, 15)
+      ));
+    }
+  } else {
+    spawnPinkFood(x, y);
+  }
+}
+
+function mousePressed() {
+  handleTap(mouseX, mouseY);
   return false;
 }
 
-function touchStarted(){
-  if(touches.length>0){
-    interact(touches[0].x,touches[0].y);
+function touchStarted() {
+  if (touches.length > 0) {
+    handleTap(touches[0].x, touches[0].y);
   }
   return false;
 }
 
 // --------------------------------------------------
-// RESIZE
+// RESIZING
 // --------------------------------------------------
 
-function windowResized(){
-  const oldW=width;
-  const oldH=height;
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
 
-  resizeCanvas(windowWidth,windowHeight);
+  calculateDimensions();
 
-  const sx=width/oldW;
-  const sy=height/oldH;
-
-  for(const p of mold){
-    p.x*=sx;
-    p.y*=sy;
-  }
-
-  for(const p of pinkFood){
-    p.x*=sx;
-    p.y*=sy;
-  }
-
-  for(const h of hearts){
-    h.x*=sx;
-    h.y*=sy;
-  }
-
-  if(lizard){
-    lizard.x*=sx;
-    lizard.y*=sy;
-
-    for(const p of lizard.history){
-      p.x*=sx;
-      p.y*=sy;
-    }
-
+  if (lizard) {
     lizard.resize();
   }
 }
