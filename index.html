@@ -47,14 +47,14 @@
     function initScreenEdgeMold() {
       moldParticles = [];
       // Top & Bottom edges
-      for (let x = 0; x < width; x += 12) {
-        moldParticles.push({ x: x, y: 5 });
-        moldParticles.push({ x: x, y: height - 5 });
+      for (let x = 0; x < width; x += 10) {
+        moldParticles.push({ x: x, y: 5, isEdge: true });
+        moldParticles.push({ x: x, y: height - 5, isEdge: true });
       }
       // Left & Right edges
-      for (let y = 0; y < height; y += 12) {
-        moldParticles.push({ x: 5, y: y });
-        moldParticles.push({ x: width - 5, y: y });
+      for (let y = 0; y < height; y += 10) {
+        moldParticles.push({ x: 5, y: y, isEdge: true });
+        moldParticles.push({ x: width - 5, y: y, isEdge: true });
       }
     }
 
@@ -62,25 +62,28 @@
       // 1. Layer 1: Full window light grey background
       background(235, 235, 235);
 
-      // 2. Layer 2: Mold Growth - continuous edge spawning and strand growth inward
-      if (moldParticles.length < 5000) {
+      // 2. Layer 2: Mold Growth - Continuous edge spawning and active inward stacking strands
+      if (moldParticles.length < 6000) {
+        // Spawn on screen edges at a slow/steady pace
         let side = floor(random(4));
         let sx, sy;
-        if (side === 0) { sx = random(width); sy = random(0, 8); }
-        else if (side === 1) { sx = random(width); sy = height - random(0, 8); }
-        else if (side === 2) { sx = random(0, 8); sy = random(height); }
-        else { sx = width - random(0, 8); sy = random(height); }
-        moldParticles.push({ x: sx, y: sy });
+        if (side === 0) { sx = random(width); sy = random(0, 6); }
+        else if (side === 1) { sx = random(width); sy = height - random(0, 6); }
+        else if (side === 2) { sx = random(0, 6); sy = random(height); }
+        else { sx = width - random(0, 6); sy = random(height); }
+        moldParticles.push({ x: sx, y: sy, isEdge: true });
 
+        // Branch and stack inward from existing mold nodes to form active growing strands
         let parent = random(moldParticles);
         if (parent) {
           let centerAngle = atan2(height / 2 - parent.y, width / 2 - parent.x);
-          let angle = centerAngle + random(-25, 25);
-          let nx = parent.x + cos(angle) * 5;
-          let ny = parent.y + sin(angle) * 5;
+          let angle = centerAngle + random(-20, 20);
+          let nx = parent.x + cos(angle) * 4;
+          let ny = parent.y + sin(angle) * 4;
 
-          if (nx > 15 && nx < width - 15 && ny > 15 && ny < height - 15) {
-            moldParticles.push({ x: nx, y: ny });
+          // Keep within window bounds while stacking inward toward center
+          if (nx > 20 && nx < width - 20 && ny > 20 && ny < height - 20) {
+            moldParticles.push({ x: nx, y: ny, isEdge: false });
           }
         }
       }
