@@ -3,1093 +3,655 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Interactive Terrarium</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Terrarium</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 <style>
-html, body {
+  html, body {
     margin: 0;
     padding: 0;
     overflow: hidden;
-    background: rgb(235,235,235);
-    width: 100%;
-    height: 100%;
-    user-select: none;
-    -webkit-user-select: none;
+    background: #777;
     touch-action: none;
-}
-
-#canvas-container {
-    width: 100vw;
-    height: 100vh;
-}
+  }
+  canvas {
+    display: block;
+  }
 </style>
 </head>
-
 <body>
-<div id="canvas-container"></div>
-
 <script>
-
-// ==================================================
-// GLOBAL VARIABLES
-// ==================================================
-
 let moldParticles = [];
-let growthFrontier = [];
-let spatialGrid = {};
-
-let cellSize = 8;
-
 let pinkFood = [];
 let heartParticles = [];
-
+let growthFrontier = [];
 let lizard;
 
-// Targets abandoned after timeout
-let abandonedTargets = new WeakSet();
-
-const MAX_MOLD = 6000;
-
-const GROWTH_STEP_MIN = 4.5;
-const GROWTH_STEP_MAX = 7.0;
-const GROWTH_ANGLE = 65;
-const GROWTH_ATTEMPTS_PER_FRAME = 4;
-const MAX_CHILDREN = 3;
-
-
-// ==================================================
-// INITIALIZATION
-// ==================================================
+let lastGrowth = 0;
+let growthInterval = 230;
+let maxMold = 1800;
 
 function setup() {
-
-    let canvas = createCanvas(windowWidth, windowHeight);
-    canvas.parent('canvas-container');
-
-    angleMode(DEGREES);
-
-    lizard = new Lizard(width / 2, height / 2);
-
-    initScreenEdgeMold();
+  createCanvas(windowWidth, windowHeight);
+  pixelDensity(1);
+  initScreenEdgeMold();
+  lizard = new Lizard();
 }
-
-
-// ==================================================
-// SPATIAL GRID
-// ==================================================
-
-function getKey(x, y) {
-    return floor(x / cellSize) + "," + floor(y / cellSize);
-}
-
-
-function addSpatial(p) {
-
-    let key = getKey(p.x, p.y);
-
-    if (!spatialGrid[key]) {
-        spatialGrid[key] = [];
-    }
-
-    spatialGrid[key].push(p);
-}
-
-
-function removeSpatial(p) {
-
-    let key = getKey(p.x, p.y);
-    let cell = spatialGrid[key];
-
-    if (cell) {
-
-        let idx = cell.indexOf(p);
-
-        if (idx !== -1) {
-            cell.splice(idx, 1);
-        }
-
-        if (cell.length === 0) {
-            delete spatialGrid[key];
-        }
-    }
-
-    p.active = false;
-}
-
-
-function checkOverlap(x, y, minDist = 4) {
-
-    let cx = floor(x / cellSize);
-    let cy = floor(y / cellSize);
-
-    let range = ceil(minDist / cellSize) + 1;
-
-    for (let dx = -range; dx <= range; dx++) {
-
-        for (let dy = -range; dy <= range; dy++) {
-
-            let key = (cx + dx) + "," + (cy + dy);
-            let cell = spatialGrid[key];
-
-            if (!cell) continue;
-
-            for (let p of cell) {
-
-                if (
-                    p.active &&
-                    dist(x, y, p.x, p.y) < minDist
-                ) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
-
-// ==================================================
-// MOLD PARTICLES
-// ==================================================
-
-class MoldParticle {
-
-    constructor(x, y) {
-
-        this.x = x;
-        this.y = y;
-
-        this.active = true;
-
-        this.children = 0;
-
-        this.size = random(2.5, 4.0);
-        this.alpha = random(190, 240);
-
-        this.growthCooldown = floor(random(0, 30));
-    }
-
-
-    canGrow() {
-
-        return this.active &&
-               this.children < MAX_CHILDREN;
-    }
-
-}
-
-
-// ==================================================
-// INITIAL EDGE COVERAGE
-// ==================================================
-
-function initScreenEdgeMold() {
-
-    moldParticles = [];
-    growthFrontier = [];
-    spatialGrid = {};
-
-    let spacing = 6;
-
-    // Top and bottom edges
-    for (let x = 3; x < width; x += spacing) {
-
-        addMold(new MoldParticle(x, 3));
-        addMold(new MoldParticle(x, height - 3));
-    }
-
-    // Left and right edges
-    for (let y = 3; y < height; y += spacing) {
-
-        addMold(new MoldParticle(3, y));
-        addMold(new MoldParticle(width - 3, y));
-    }
-}
-
-
-function addMold(p) {
-
-    moldParticles.push(p);
-    growthFrontier.push(p);
-
-    addSpatial(p);
-}
-
-
-// ==================================================
-// ORGANIC INWARD MOLD GROWTH
-// ==================================================
-
-function growMold() {
-
-    if (moldParticles.length >= MAX_MOLD) return;
-
-    let centerX = width / 2;
-    let centerY = height / 2;
-
-    for (
-        let attempt = 0;
-        attempt < GROWTH_ATTEMPTS_PER_FRAME;
-        attempt++
-    ) {
-
-        if (moldParticles.length >= MAX_MOLD) break;
-
-        if (growthFrontier.length === 0) break;
-
-        let index = floor(random(growthFrontier.length));
-        let parent = growthFrontier[index];
-
-        if (!parent.active || !parent.canGrow()) {
-
-            growthFrontier.splice(index, 1);
-            attempt--;
-            continue;
-        }
-
-        parent.growthCooldown--;
-
-        if (parent.growthCooldown > 0) continue;
-
-        let oldDistance = dist(
-            parent.x,
-            parent.y,
-            centerX,
-            centerY
-        );
-
-        // General inward direction
-        let inwardAngle = atan2(
-            centerY - parent.y,
-            centerX - parent.x
-        );
-
-        let successful = false;
-
-        // Randomized growth attempts
-        for (let trial = 0; trial < 8; trial++) {
-
-            let angle = inwardAngle +
-                random(-GROWTH_ANGLE, GROWTH_ANGLE);
-
-            let step = random(
-                GROWTH_STEP_MIN,
-                GROWTH_STEP_MAX
-            );
-
-            let nx = parent.x + cos(angle) * step;
-            let ny = parent.y + sin(angle) * step;
-
-            // Screen boundaries
-            if (
-                nx < 5 || nx > width - 5 ||
-                ny < 5 || ny > height - 5
-            ) {
-                continue;
-            }
-
-            let newDistance = dist(
-                nx, ny,
-                centerX, centerY
-            );
-
-            // Every offspring must be closer to center
-            if (newDistance >= oldDistance - 0.5) {
-                continue;
-            }
-
-            if (checkOverlap(nx, ny, 4.0)) {
-                continue;
-            }
-
-            let child = new MoldParticle(nx, ny);
-
-            addMold(child);
-
-            parent.children++;
-
-            parent.growthCooldown = floor(random(5, 25));
-
-            successful = true;
-
-            break;
-        }
-
-        // Retire blocked growth tips
-        if (!successful) {
-
-            parent.children++;
-
-            if (parent.children >= MAX_CHILDREN) {
-                growthFrontier.splice(index, 1);
-            }
-        }
-
-        if (parent.children >= MAX_CHILDREN) {
-
-            let idx = growthFrontier.indexOf(parent);
-
-            if (idx !== -1) {
-                growthFrontier.splice(idx, 1);
-            }
-        }
-    }
-}
-
-
-// ==================================================
-// DISPLAY MOLD
-// ==================================================
-
-function displayMold() {
-
-    noStroke();
-
-    for (let p of moldParticles) {
-
-        if (!p.active) continue;
-
-        fill(100, 190, 80, p.alpha);
-
-        circle(p.x, p.y, p.size);
-    }
-}
-
-
-// ==================================================
-// MAIN DRAW LOOP
-// ==================================================
 
 function draw() {
+  background(112, 115, 112);
 
-    background(235, 235, 235);
+  growMold();
+  displayMold();
 
-    growMold();
+  for (let i = pinkFood.length - 1; i >= 0; i--) {
+    const f = pinkFood[i];
+    fill(255, 130, 190);
+    noStroke();
+    circle(f.x, f.y, f.r * 2);
+    fill(255, 210, 230, 130);
+    circle(f.x - f.r * 0.25, f.y - f.r * 0.25, f.r * 0.65);
+  }
 
-    displayMold();
+  lizard.update();
+  lizard.display();
 
-    // Pink food
-    for (let i = pinkFood.length - 1; i >= 0; i--) {
-
-        let f = pinkFood[i];
-
-        fill(255, 105, 180);
-        stroke(255, 192, 203);
-        strokeWeight(1.5);
-
-        circle(
-            f.x,
-            f.y,
-            10 + sin(frameCount * 10 + i) * 2
-        );
-    }
-
-    // Lizard
-    lizard.update();
-    lizard.display();
-
-    // Hearts
-    for (let i = heartParticles.length - 1; i >= 0; i--) {
-
-        let hp = heartParticles[i];
-
-        hp.update();
-        hp.display();
-
-        if (hp.isDead()) {
-            heartParticles.splice(i, 1);
-        }
-    }
+  for (let i = heartParticles.length - 1; i >= 0; i--) {
+    heartParticles[i].update();
+    heartParticles[i].display();
+    if (heartParticles[i].life <= 0) heartParticles.splice(i, 1);
+  }
 }
 
-
-// ==================================================
-// LIZARD
-// ==================================================
-
-class Lizard {
-
-    constructor(x, y) {
-
-        this.numSegments = 16;
-        this.segmentLen = 10;
-
-        this.history = [];
-
-        // Movement physics
-        this.velocity = createVector(1, 0);
-
-        this.maxSpeed = 2.5;
-        this.maxForce = 0.065;
-
-        this.headAngle = 0;
-
-        // Targeting
-        this.currentTarget = null;
-        this.targetStartTime = 0;
-
-        // Smooth wandering
-        this.wanderAngle = random(360);
-        this.wanderTimer = 0;
-
-        for (let i = 0; i < this.numSegments; i++) {
-
-            this.history.push(
-                createVector(
-                    x - i * this.segmentLen,
-                    y
-                )
-            );
-        }
-    }
-
-
-    // ==================================================
-    // TARGET SELECTION
-    // ==================================================
-
-    selectTarget() {
-
-        let centerX = width / 2;
-        let centerY = height / 2;
-
-        let bestTarget = null;
-        let bestDistance = Infinity;
-        let targetType = null;
-
-        // Search all green mold particles
-        for (let p of moldParticles) {
-
-            if (!p.active) continue;
-
-            if (abandonedTargets.has(p)) continue;
-
-            let d = dist(
-                p.x, p.y,
-                centerX, centerY
-            );
-
-            if (d < bestDistance) {
-
-                bestDistance = d;
-                bestTarget = p;
-                targetType = 'mold';
-            }
-        }
-
-        // Search pink food
-        for (let f of pinkFood) {
-
-            if (abandonedTargets.has(f)) continue;
-
-            let d = dist(
-                f.x, f.y,
-                centerX, centerY
-            );
-
-            if (d < bestDistance) {
-
-                bestDistance = d;
-                bestTarget = f;
-                targetType = 'pink';
-            }
-        }
-
-        if (bestTarget) {
-
-            this.currentTarget = {
-                type: targetType,
-                ref: bestTarget
-            };
-
-            this.targetStartTime = millis();
-
-            return true;
-        }
-
-        return false;
-    }
-
-
-    // ==================================================
-    // VALIDATE CURRENT TARGET
-    // ==================================================
-
-    validateTarget() {
-
-        if (!this.currentTarget) return false;
-
-        let ref = this.currentTarget.ref;
-
-        let valid = false;
-
-        if (this.currentTarget.type === 'pink') {
-
-            valid = pinkFood.includes(ref);
-        }
-
-        else if (this.currentTarget.type === 'mold') {
-
-            valid =
-                ref.active &&
-                moldParticles.includes(ref);
-        }
-
-        // Target timeout
-        if (millis() - this.targetStartTime >= 5000) {
-
-            abandonedTargets.add(ref);
-
-            valid = false;
-        }
-
-        if (!valid) {
-
-            this.currentTarget = null;
-
-            return false;
-        }
-
-        return true;
-    }
-
-
-    // ==================================================
-    // SMOOTH STEERING
-    // ==================================================
-
-    steerTowards(target) {
-
-        let head = this.history[0];
-
-        let desired = p5.Vector.sub(target, head);
-
-        let distance = desired.mag();
-
-        if (distance < 0.001) return;
-
-        desired.normalize();
-
-        // Gradually slow down when approaching destination
-        let speed = this.maxSpeed;
-
-        let arrivalRadius = 65;
-
-        if (distance < arrivalRadius) {
-
-            speed = map(
-                distance,
-                0,
-                arrivalRadius,
-                0.9,
-                this.maxSpeed
-            );
-
-            speed = constrain(speed, 0.9, this.maxSpeed);
-        }
-
-        desired.mult(speed);
-
-        // Steering force
-        let steering = p5.Vector.sub(
-            desired,
-            this.velocity
-        );
-
-        steering.limit(this.maxForce);
-
-        // Apply acceleration
-        this.velocity.add(steering);
-
-        this.velocity.limit(this.maxSpeed);
-    }
-
-
-    // ==================================================
-    // NATURAL WANDERING
-    // ==================================================
-
-    wander() {
-
-        this.wanderTimer--;
-
-        if (this.wanderTimer <= 0) {
-
-            this.wanderAngle += random(-45, 45);
-
-            this.wanderTimer = floor(random(25, 65));
-        }
-
-        let head = this.history[0];
-
-        let wanderDistance = 100;
-
-        let target = createVector(
-            head.x + cos(this.wanderAngle) * wanderDistance,
-            head.y + sin(this.wanderAngle) * wanderDistance
-        );
-
-        // Gently guide away from boundaries
-        let margin = 90;
-
-        if (
-            head.x < margin ||
-            head.x > width - margin ||
-            head.y < margin ||
-            head.y > height - margin
-        ) {
-
-            target = createVector(
-                width / 2,
-                height / 2
-            );
-        }
-
-        this.steerTowards(target);
-    }
-
-
-    // ==================================================
-    // BODY FOLLOWING
-    // ==================================================
-
-    updateBody() {
-
-        for (let i = 1; i < this.history.length; i++) {
-
-            let prev = this.history[i - 1];
-            let curr = this.history[i];
-
-            let dir = p5.Vector.sub(prev, curr);
-
-            if (dir.magSq() < 0.001) {
-                dir.set(1, 0);
-            }
-
-            dir.setMag(this.segmentLen);
-
-            let desiredPosition = p5.Vector.sub(prev, dir);
-
-            // Slight smoothing for natural body movement
-            curr.lerp(desiredPosition, 0.85);
-        }
-    }
-
-
-    // ==================================================
-    // EATING
-    // ==================================================
-
-    eatFood(nextHead) {
-
-        // Pink food
-        for (let i = pinkFood.length - 1; i >= 0; i--) {
-
-            let f = pinkFood[i];
-
-            if (
-                dist(nextHead.x, nextHead.y, f.x, f.y) < 20
-            ) {
-
-                pinkFood.splice(i, 1);
-
-                if (
-                    this.currentTarget &&
-                    this.currentTarget.ref === f
-                ) {
-                    this.currentTarget = null;
-                }
-
-                spawnHearts(
-                    nextHead.x,
-                    nextHead.y,
-                    4
-                );
-            }
-        }
-
-        // Green mold
-        for (let i = moldParticles.length - 1; i >= 0; i--) {
-
-            let p = moldParticles[i];
-
-            if (
-                p.active &&
-                dist(nextHead.x, nextHead.y, p.x, p.y) < 16
-            ) {
-
-                removeSpatial(p);
-
-                moldParticles.splice(i, 1);
-
-                let idx = growthFrontier.indexOf(p);
-
-                if (idx !== -1) {
-                    growthFrontier.splice(idx, 1);
-                }
-
-                if (
-                    this.currentTarget &&
-                    this.currentTarget.ref === p
-                ) {
-                    this.currentTarget = null;
-                }
-            }
-        }
-    }
-
-
-    // ==================================================
-    // MAIN UPDATE
-    // ==================================================
-
-    update() {
-
-        let head = this.history[0];
-
-        // Validate target or abandon after five seconds
-        this.validateTarget();
-
-        // Select a new target if necessary
-        if (!this.currentTarget) {
-            this.selectTarget();
-        }
-
-        // Move towards selected food
-        if (this.currentTarget) {
-
-            let target = createVector(
-                this.currentTarget.ref.x,
-                this.currentTarget.ref.y
-            );
-
-            this.steerTowards(target);
-
-        } else {
-
-            this.wander();
-        }
-
-
-        // Boundary avoidance
-        let margin = 25;
-
-        if (
-            head.x < margin ||
-            head.x > width - margin ||
-            head.y < margin ||
-            head.y > height - margin
-        ) {
-
-            let center = createVector(
-                width / 2,
-                height / 2
-            );
-
-            this.steerTowards(center);
-        }
-
-
-        // Move head using velocity
-        let nextHead = p5.Vector.add(
-            head,
-            this.velocity
-        );
-
-        // Keep inside window
-        nextHead.x = constrain(
-            nextHead.x,
-            margin,
-            width - margin
-        );
-
-        nextHead.y = constrain(
-            nextHead.y,
-            margin,
-            height - margin
-        );
-
-        this.history[0] = nextHead;
-
-        // Smooth body following
-        this.updateBody();
-
-        // Update head orientation
-        if (this.velocity.magSq() > 0.01) {
-
-            this.headAngle = this.velocity.heading();
-        }
-
-        // Eat nearby food
-        this.eatFood(nextHead);
-    }
-
-
-    // ==================================================
-    // DISPLAY
-    // ==================================================
-
-    display() {
-
-        // Legs
-        noFill();
-
-        this.drawLegPair(4, 20, 40);
-        this.drawLegPair(11, 16, 50);
-
-        // Body segments
-        for (let i = this.history.length - 1; i >= 0; i--) {
-
-            let pos = this.history[i];
-
-            let size = map(
-                i,
-                0,
-                this.history.length - 1,
-                22,
-                14
-            );
-
-            fill(240, 130, 40);
-
-            stroke(180, 80, 20);
-            strokeWeight(2);
-
-            circle(
-                pos.x,
-                pos.y,
-                size
-            );
-        }
-
-        // Head
-        let head = this.history[0];
-
-        push();
-
-        translate(head.x, head.y);
-        rotate(this.headAngle);
-
-        fill(250, 140, 50);
-
-        stroke(180, 80, 20);
-        strokeWeight(2);
-
-        ellipse(2, 0, 28, 22);
-
-        // Eyes
-        fill(255);
-        noStroke();
-
-        ellipse(6, -6, 7, 7);
-        ellipse(6, 6, 7, 7);
-
-        fill(30);
-
-        ellipse(7, -6, 3, 4);
-        ellipse(7, 6, 3, 4);
-
-        pop();
-    }
-
-
-    // ==================================================
-    // LEGS
-    // ==================================================
-
-    drawLegPair(segmentIdx, legLen, restAngle) {
-
-        if (segmentIdx >= this.history.length) return;
-
-        let pos = this.history[segmentIdx];
-        let prev = this.history[segmentIdx - 1];
-
-        let angle = atan2(
-            pos.y - prev.y,
-            pos.x - prev.x
-        );
-
-        stroke(200, 100, 30);
-        strokeWeight(4);
-        strokeCap(ROUND);
-
-        let wiggle = sin(
-            frameCount * 12 + segmentIdx * 10
-        ) * 12;
-
-        push();
-
-        translate(pos.x, pos.y);
-
-        rotate(angle - restAngle + wiggle);
-
-        line(0, 0, 0, -legLen);
-
-        pop();
-
-        push();
-
-        translate(pos.x, pos.y);
-
-        rotate(angle + restAngle - wiggle);
-
-        line(0, 0, 0, legLen);
-
-        pop();
-    }
-
-
-    // ==================================================
-    // TOUCH DETECTION
-    // ==================================================
-
-    containsPoint(px, py) {
-
-        for (let i = 0; i < 6; i++) {
-
-            if (
-                dist(
-                    px, py,
-                    this.history[i].x,
-                    this.history[i].y
-                ) < 22
-            ) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
+// --------------------------------------------------
+// MOLD
+// --------------------------------------------------
+
+class MoldParticle {
+  constructor(x, y, r = 4) {
+    this.x = x;
+    this.y = y;
+    this.r = r;
+    this.children = 0;
+    this.cooldown = random(0, 500);
+    this.alive = true;
+  }
 }
 
+function initScreenEdgeMold() {
+  moldParticles = [];
+  growthFrontier = [];
 
-// ==================================================
-// HEART PARTICLES
-// ==================================================
+  const spacing = max(13, min(width, height) * 0.035);
+  const r = max(2.5, min(width, height) * 0.009);
+
+  // Top and bottom edges
+  for (let x = 0; x <= width; x += spacing) {
+    addMold(x + random(-2, 2), random(0, spacing * 0.6), r);
+    addMold(x + random(-2, 2), height - random(0, spacing * 0.6), r);
+  }
+
+  // Left and right edges
+  for (let y = spacing; y < height; y += spacing) {
+    addMold(random(0, spacing * 0.6), y + random(-2, 2), r);
+    addMold(width - random(0, spacing * 0.6), y + random(-2, 2), r);
+  }
+}
+
+function addMold(x, y, r) {
+  const p = new MoldParticle(
+    constrain(x, 0, width),
+    constrain(y, 0, height),
+    r
+  );
+
+  // Avoid excessive overlap during initial seeding.
+  for (const other of moldParticles) {
+    if (dist(p.x, p.y, other.x, other.y) < (p.r + other.r) * 0.85) {
+      return null;
+    }
+  }
+
+  moldParticles.push(p);
+  growthFrontier.push(p);
+  return p;
+}
+
+function growMold() {
+  if (millis() - lastGrowth < growthInterval) return;
+  lastGrowth = millis();
+
+  if (moldParticles.length >= maxMold || growthFrontier.length === 0) return;
+
+  // Try several parents so one blocked branch cannot stall growth.
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const parent = random(growthFrontier);
+    if (!parent || !parent.alive) continue;
+
+    if (parent.children >= 5) {
+      growthFrontier = growthFrontier.filter(p => p !== parent);
+      continue;
+    }
+
+    const cx = width / 2;
+    const cy = height / 2;
+
+    const dx = cx - parent.x;
+    const dy = cy - parent.y;
+    const centerDistance = Math.hypot(dx, dy);
+
+    if (centerDistance < min(width, height) * 0.035) {
+      growthFrontier = growthFrontier.filter(p => p !== parent);
+      continue;
+    }
+
+    const inwardAngle = Math.atan2(dy, dx);
+    const angle = inwardAngle + random(-1.15, 1.15);
+    const step = parent.r * random(1.7, 2.8);
+
+    const nx = parent.x + Math.cos(angle) * step;
+    const ny = parent.y + Math.sin(angle) * step;
+
+    if (nx < 0 || nx > width || ny < 0 || ny > height) continue;
+
+    // Every offspring must be closer to the center than its parent.
+    const newDistance = dist(nx, ny, cx, cy);
+    if (newDistance >= centerDistance - 1) continue;
+
+    let overlaps = false;
+    for (const other of moldParticles) {
+      if (dist(nx, ny, other.x, other.y) < (parent.r + other.r) * 1.15) {
+        overlaps = true;
+        break;
+      }
+    }
+
+    if (overlaps) continue;
+
+    const child = addMold(nx, ny, parent.r * random(0.82, 1.08));
+    if (child) {
+      parent.children++;
+      parent.cooldown = random(200, 700);
+      return;
+    }
+  }
+}
+
+function displayMold() {
+  noStroke();
+
+  for (const p of moldParticles) {
+    fill(55, 145 + random(-8, 8), 65);
+    circle(p.x, p.y, p.r * 2);
+
+    fill(115, 190, 95, 100);
+    circle(p.x - p.r * 0.2, p.y - p.r * 0.2, p.r * 0.75);
+  }
+}
+
+// --------------------------------------------------
+// HEARTS
+// --------------------------------------------------
 
 class HeartParticle {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.vx = random(-0.7, 0.7);
+    this.vy = random(-1.8, -0.7);
+    this.life = 70;
+    this.size = random(12, 19);
+  }
 
-    constructor(x, y) {
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy -= 0.012;
+    this.life--;
+  }
 
-        this.x = x + random(-10, 10);
-        this.y = y + random(-10, 10);
-
-        this.vy = random(-2, -0.8);
-        this.vx = random(-0.5, 0.5);
-
-        this.alpha = 255;
-        this.size = random(16, 24);
-    }
-
-
-    update() {
-
-        this.x += this.vx;
-        this.y += this.vy;
-
-        this.alpha -= 4;
-    }
-
-
-    display() {
-
-        push();
-
-        translate(this.x, this.y);
-
-        textSize(this.size);
-        textAlign(CENTER, CENTER);
-
-        fill(220, 50, 90, this.alpha);
-
-        text('❤️', 0, 0);
-
-        pop();
-    }
-
-
-    isDead() {
-
-        return this.alpha <= 0;
-    }
-
+  display() {
+    push();
+    translate(this.x, this.y);
+    noStroke();
+    fill(255, 100, 155, map(this.life, 0, 70, 0, 230));
+    textAlign(CENTER, CENTER);
+    textSize(this.size);
+    text("♥", 0, 0);
+    pop();
+  }
 }
 
-
-function spawnHearts(x, y, count = 3) {
-
-    for (let i = 0; i < count; i++) {
-
-        heartParticles.push(
-            new HeartParticle(x, y)
-        );
-    }
+function spawnHearts(x, y) {
+  for (let i = 0; i < 5; i++) {
+    heartParticles.push(new HeartParticle(x + random(-12, 12), y + random(-8, 8)));
+  }
 }
 
+// --------------------------------------------------
+// LIZARD
+// --------------------------------------------------
 
-// ==================================================
-// USER INTERACTION
-// ==================================================
+class Lizard {
+  constructor() {
+    this.unit = min(width, height) / 400;
+    this.bodyLength = 9;
+    this.segmentSpacing = 8 * this.unit;
+    this.headRadius = 8 * this.unit;
+
+    this.x = width * 0.5;
+    this.y = height * 0.5;
+
+    // Start with a non-zero velocity in a random direction.
+    const initialAngle = random(TWO_PI);
+    this.vx = Math.cos(initialAngle);
+    this.vy = Math.sin(initialAngle);
+
+    this.heading = initialAngle;
+    this.maxSpeed = 2.0 * this.unit;
+    this.acceleration = 0.085 * this.unit;
+    this.turnRate = 0.055;
+
+    this.segments = [];
+    for (let i = 0; i < this.bodyLength; i++) {
+      this.segments.push({
+        x: this.x - Math.cos(initialAngle) * this.segmentSpacing * (i + 1),
+        y: this.y - Math.sin(initialAngle) * this.segmentSpacing * (i + 1)
+      });
+    }
+
+    this.target = null;
+    this.targetStarted = 0;
+    this.abandoned = new WeakSet();
+
+    this.waypoint = null;
+    this.nextWaypointTime = 0;
+    this.pickWaypoint();
+
+    this.legPhase = 0;
+  }
+
+  // Choose a roaming destination using the actual window dimensions.
+  pickWaypoint() {
+    const marginX = width * 0.13;
+    const marginY = height * 0.13;
+
+    this.waypoint = {
+      x: random(marginX, max(marginX + 1, width - marginX)),
+      y: random(marginY, max(marginY + 1, height - marginY))
+    };
+
+    this.nextWaypointTime = millis() + random(3500, 6500);
+  }
+
+  selectTarget() {
+    let best = null;
+    let bestScore = Infinity;
+
+    const cx = width / 2;
+    const cy = height / 2;
+    const screenSize = Math.hypot(width, height);
+
+    // Green mold is the primary food.
+    for (const p of moldParticles) {
+      if (!p.alive || this.abandoned.has(p)) continue;
+
+      const centerDist = dist(p.x, p.y, cx, cy) / screenSize;
+      const travelDist = dist(this.x, this.y, p.x, p.y) / screenSize;
+
+      // Center proximity matters much more than travel distance.
+      const score = centerDist * 0.78 + travelDist * 0.22;
+
+      if (score < bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    }
+
+    // Pink food remains edible, but mold takes priority.
+    if (!best && pinkFood.length > 0) {
+      for (const p of pinkFood) {
+        const centerDist = dist(p.x, p.y, cx, cy) / screenSize;
+        const travelDist = dist(this.x, this.y, p.x, p.y) / screenSize;
+        const score = centerDist * 0.78 + travelDist * 0.22;
+
+        if (score < bestScore) {
+          bestScore = score;
+          best = p;
+        }
+      }
+    }
+
+    if (best) {
+      this.target = best;
+      this.targetStarted = millis();
+    }
+  }
+
+  validateTarget() {
+    if (!this.target) return;
+
+    const isMold = this.target instanceof MoldParticle;
+    const stillExists = isMold
+      ? this.target.alive && moldParticles.includes(this.target)
+      : pinkFood.includes(this.target);
+
+    if (!stillExists) {
+      this.target = null;
+      return;
+    }
+
+    // Do not retry a target that has proven unreachable.
+    if (millis() - this.targetStarted > 5000) {
+      if (isMold) this.abandoned.add(this.target);
+      this.target = null;
+    }
+  }
+
+  // Smooth acceleration toward a desired direction.
+  steerToward(tx, ty, strength = 1) {
+    let dx = tx - this.x;
+    let dy = ty - this.y;
+    const d = Math.hypot(dx, dy);
+
+    if (d < 0.001) return;
+
+    dx /= d;
+    dy /= d;
+
+    const desiredVx = dx * this.maxSpeed;
+    const desiredVy = dy * this.maxSpeed;
+
+    this.vx += (desiredVx - this.vx) * this.turnRate * strength;
+    this.vy += (desiredVy - this.vy) * this.turnRate * strength;
+  }
+
+  avoidEdges() {
+    // Smooth inward pressure increases as the lizard approaches an edge.
+    const margin = min(width, height) * 0.12;
+    let fx = 0;
+    let fy = 0;
+
+    if (this.x < margin) fx += (margin - this.x) / margin;
+    if (this.x > width - margin) fx -= (this.x - (width - margin)) / margin;
+    if (this.y < margin) fy += (margin - this.y) / margin;
+    if (this.y > height - margin) fy -= (this.y - (height - margin)) / margin;
+
+    const forceLength = Math.hypot(fx, fy);
+
+    if (forceLength > 0.01) {
+      fx /= forceLength;
+      fy /= forceLength;
+
+      // Blend edge avoidance with current movement.
+      this.vx += fx * this.acceleration * 2.4;
+      this.vy += fy * this.acceleration * 2.4;
+    }
+  }
+
+  updateBody() {
+    // Each segment follows the preceding point at a stable distance.
+    let previous = { x: this.x, y: this.y };
+
+    for (const segment of this.segments) {
+      const dx = segment.x - previous.x;
+      const dy = segment.y - previous.y;
+      const d = Math.hypot(dx, dy);
+
+      if (d > this.segmentSpacing) {
+        const ratio = this.segmentSpacing / d;
+        segment.x = previous.x + dx * ratio;
+        segment.y = previous.y + dy * ratio;
+      }
+
+      previous = segment;
+    }
+  }
+
+  eatFood() {
+    const eatDistance = this.headRadius + 7 * this.unit;
+
+    if (!this.target) return;
+
+    if (dist(this.x, this.y, this.target.x, this.target.y) < eatDistance) {
+      if (this.target instanceof MoldParticle) {
+        const eaten = this.target;
+        eaten.alive = false;
+        moldParticles = moldParticles.filter(p => p !== eaten);
+        growthFrontier = growthFrontier.filter(p => p !== eaten);
+      } else {
+        pinkFood = pinkFood.filter(p => p !== this.target);
+      }
+
+      this.target = null;
+    }
+  }
+
+  update() {
+    const now = millis();
+
+    this.validateTarget();
+
+    if (!this.target) this.selectTarget();
+
+    // If chasing, move toward food. Otherwise, explore.
+    if (this.target) {
+      this.steerToward(this.target.x, this.target.y, 1.0);
+    } else {
+      if (!this.waypoint ||
+          now > this.nextWaypointTime ||
+          dist(this.x, this.y, this.waypoint.x, this.waypoint.y) < min(width, height) * 0.09) {
+        this.pickWaypoint();
+      }
+
+      this.steerToward(this.waypoint.x, this.waypoint.y, 0.72);
+    }
+
+    this.avoidEdges();
+
+    // Prevent velocity from becoming zero or unstable.
+    let speed = Math.hypot(this.vx, this.vy);
+
+    if (speed < this.maxSpeed * 0.25) {
+      const a = this.heading + random(-0.25, 0.25);
+      this.vx += Math.cos(a) * this.acceleration;
+      this.vy += Math.sin(a) * this.acceleration;
+      speed = Math.hypot(this.vx, this.vy);
+    }
+
+    // Clamp speed to a responsive, predictable range.
+    const max = this.maxSpeed;
+    if (speed > max) {
+      this.vx = this.vx / speed * max;
+      this.vy = this.vy / speed * max;
+    }
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Hard safety boundary: reflect inward if numerical drift reaches an edge.
+    const pad = this.headRadius * 1.5;
+    if (this.x < pad) {
+      this.x = pad;
+      this.vx = Math.abs(this.vx) + this.acceleration;
+    }
+    if (this.x > width - pad) {
+      this.x = width - pad;
+      this.vx = -Math.abs(this.vx) - this.acceleration;
+    }
+    if (this.y < pad) {
+      this.y = pad;
+      this.vy = Math.abs(this.vy) + this.acceleration;
+    }
+    if (this.y > height - pad) {
+      this.y = height - pad;
+      this.vy = -Math.abs(this.vy) - this.acceleration;
+    }
+
+    this.heading = Math.atan2(this.vy, this.vx);
+    this.legPhase += speed * 0.12;
+
+    this.updateBody();
+    this.eatFood();
+  }
+
+  display() {
+    push();
+
+    // Tail to neck/body.
+    noStroke();
+
+    for (let i = this.segments.length - 1; i >= 0; i--) {
+      const s = this.segments[i];
+      const taper = map(i, 0, this.segments.length - 1, 0.82, 0.28);
+      const radius = this.headRadius * taper;
+
+      fill(220, 130, 75);
+      ellipse(s.x, s.y, radius * 2.0, radius * 1.65);
+    }
+
+    // Draw legs attached to the body.
+    this.drawLegPair(this.segments[1], 1);
+    this.drawLegPair(this.segments[5], -1);
+
+    // Head.
+    translate(this.x, this.y);
+    rotate(this.heading);
+
+    fill(230, 145, 85);
+    ellipse(0, 0, this.headRadius * 2.5, this.headRadius * 1.9);
+
+    // Snout.
+    fill(238, 160, 100);
+    ellipse(this.headRadius * 0.85, 0, this.headRadius * 1.1, this.headRadius * 0.9);
+
+    // Eyes.
+    fill(35, 35, 30);
+    circle(this.headRadius * 0.25, -this.headRadius * 0.48, this.headRadius * 0.3);
+    circle(this.headRadius * 0.25, this.headRadius * 0.48, this.headRadius * 0.3);
+
+    fill(255);
+    circle(this.headRadius * 0.29, -this.headRadius * 0.5, this.headRadius * 0.11);
+    circle(this.headRadius * 0.29, this.headRadius * 0.46, this.headRadius * 0.11);
+
+    pop();
+  }
+
+  drawLegPair(segment, side) {
+    if (!segment) return;
+
+    const dx = this.x - segment.x;
+    const dy = this.y - segment.y;
+    const angle = Math.atan2(dy, dx);
+
+    const offsetX = Math.cos(angle + Math.PI / 2) * this.headRadius * 0.65;
+    const offsetY = Math.sin(angle + Math.PI / 2) * this.headRadius * 0.65;
+
+    const swing = Math.sin(this.legPhase + side) * this.headRadius * 0.5;
+
+    stroke(205, 120, 70);
+    strokeWeight(max(1.5, this.unit * 2.2));
+    strokeCap(ROUND);
+
+    line(
+      segment.x + offsetX,
+      segment.y + offsetY,
+      segment.x + offsetX + Math.cos(angle + side * 0.9) * this.headRadius + swing,
+      segment.y + offsetY + Math.sin(angle + side * 0.9) * this.headRadius
+    );
+
+    line(
+      segment.x - offsetX,
+      segment.y - offsetY,
+      segment.x - offsetX + Math.cos(angle - side * 0.9) * this.headRadius - swing,
+      segment.y - offsetY + Math.sin(angle - side * 0.9) * this.headRadius
+    );
+  }
+
+  containsPoint(px, py) {
+    return dist(px, py, this.x, this.y) < this.headRadius * 2.2;
+  }
+}
+
+// --------------------------------------------------
+// INTERACTION
+// --------------------------------------------------
+
+function handleInteraction(x, y) {
+  if (lizard && lizard.containsPoint(x, y)) {
+    spawnHearts(x, y);
+  } else {
+    pinkFood.push({
+      x: x,
+      y: y,
+      r: max(4, min(width, height) * 0.012)
+    });
+  }
+}
 
 function mousePressed() {
-
-    handleInteraction(mouseX, mouseY);
+  handleInteraction(mouseX, mouseY);
+  return false;
 }
-
 
 function touchStarted() {
-
-    if (touches.length > 0) {
-
-        handleInteraction(
-            touches[0].x,
-            touches[0].y
-        );
-    }
-
-    return false;
+  if (touches.length > 0) {
+    handleInteraction(touches[0].x, touches[0].y);
+  }
+  return false;
 }
 
-
-function handleInteraction(ix, iy) {
-
-    if (lizard.containsPoint(ix, iy)) {
-
-        spawnHearts(
-            lizard.history[0].x,
-            lizard.history[0].y,
-            5
-        );
-
-        return;
-    }
-
-    pinkFood.push(
-        createVector(ix, iy)
-    );
-}
-
-
-// ==================================================
+// --------------------------------------------------
 // RESIZE
-// ==================================================
+// --------------------------------------------------
 
 function windowResized() {
+  const oldW = width;
+  const oldH = height;
 
-    resizeCanvas(windowWidth, windowHeight);
+  resizeCanvas(windowWidth, windowHeight);
 
-    initScreenEdgeMold();
+  const sx = width / oldW;
+  const sy = height / oldH;
 
-    // Clear previous target and its blacklist
-    lizard.currentTarget = null;
-    abandonedTargets = new WeakSet();
+  // Preserve the existing terrarium when orientation changes.
+  for (const p of moldParticles) {
+    p.x *= sx;
+    p.y *= sy;
+  }
+
+  for (const p of pinkFood) {
+    p.x *= sx;
+    p.y *= sy;
+  }
+
+  for (const h of heartParticles) {
+    h.x *= sx;
+    h.y *= sy;
+  }
+
+  if (lizard) {
+    lizard.x *= sx;
+    lizard.y *= sy;
+
+    for (const s of lizard.segments) {
+      s.x *= sx;
+      s.y *= sy;
+    }
+
+    if (lizard.waypoint) {
+      lizard.waypoint.x *= sx;
+      lizard.waypoint.y *= sy;
+    }
+
+    // Recalculate movement scale for the new screen dimensions.
+    lizard.unit = min(width, height) / 400;
+    lizard.headRadius = 8 * lizard.unit;
+    lizard.segmentSpacing = 8 * lizard.unit;
+    lizard.maxSpeed = 2.0 * lizard.unit;
+    lizard.acceleration = 0.085 * lizard.unit;
+  }
 }
-
 </script>
 </body>
 </html>
