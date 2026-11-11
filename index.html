@@ -102,7 +102,7 @@
         circle(f.x, f.y, 10 + sin(frameCount * 10 + i) * 2);
       }
 
-      // 3. Update & Draw Layer 3: Orange Lizard with full freedom except a 20px window edge margin
+      // 3. Update & Draw Layer 3: Orange Lizard with center-prioritization & 5s timeout switch
       lizard.update();
       lizard.display();
 
@@ -124,7 +124,7 @@
       }
     }
 
-    // Lizard Class with locked target persistence and full screen freedom (except 20px margin)
+    // Lizard Class with center-closest edible particle priority & 5-second target timeout
     class Lizard {
       constructor(x, y) {
         this.numSegments = 18;
@@ -133,14 +133,12 @@
         this.headAngle = 0;
         this.speed = 2.2;
         this.currentTarget = null;
-
-        for (let i = 0; i < this.numSegments; i++) {
-          this.history.push(createVector(x - i * this.segmentLen, y));
-        }
+        this.targetStartTime = 0; // Tracks when current target was locked
       }
 
       update() {
         let head = this.history[0].copy();
+        let center = createVector(width / 2, height / 2);
 
         // 1. Verify if current target is still active/valid
         let targetValid = false;
@@ -152,39 +150,44 @@
           }
         }
 
-        if (!targetValid) {
+        // If target was eaten, invalidated, or 5 seconds (300 frames) have elapsed, clear it
+        if (!targetValid || (millis() - this.targetStartTime > 5000)) {
           this.currentTarget = null;
         }
 
-        // 2. If no locked target, select a new one (Pink food takes absolute priority; can target anywhere except very edge)
+        // 2. If no locked target, select the edible particle (pink food or mold) closest to the CENTER
         if (!this.currentTarget) {
-          if (pinkFood.length > 0) {
-            let closestFood = pinkFood[0];
-            let minDist = dist(head.x, head.y, closestFood.x, closestFood.y);
-            for (let f of pinkFood) {
-              let d = dist(head.x, head.y, f.x, f.y);
-              if (d < minDist) {
-                minDist = d;
-                closestFood = f;
-              }
+          let bestTarget = null;
+          let minCenterDist = Infinity;
+          let targetType = null;
+
+          // Check pink food for closest to center
+          for (let f of pinkFood) {
+            let dCenter = dist(f.x, f.y, center.x, center.y);
+            if (dCenter < minCenterDist) {
+              minCenterDist = dCenter;
+              bestTarget = f;
+              targetType = 'pink';
             }
-            this.currentTarget = { type: 'pink', ref: closestFood };
-          } else {
-            // Pick closest mold particle anywhere on screen (respecting 20px edge margin)
-            let bestMold = null;
-            let minDist = Infinity;
+          }
+
+          // If no pink food, check mold particles closest to center (respecting 20px edge margin)
+          if (!bestTarget) {
             for (let p of moldParticles) {
               if (p.x > 20 && p.x < width - 20 && p.y > 20 && p.y < height - 20) {
-                let distFromHead = dist(p.x, p.y, head.x, head.y);
-                if (distFromHead < minDist) {
-                  minDist = distFromHead;
-                  bestMold = p;
+                let dCenter = dist(p.x, p.y, center.x, center.y);
+                if (dCenter < minCenterDist) {
+                  minCenterDist = dCenter;
+                  bestTarget = p;
+                  targetType = 'mold';
                 }
               }
             }
-            if (bestMold) {
-              this.currentTarget = { type: 'mold', ref: bestMold };
-            }
+          }
+
+          if (bestTarget) {
+            this.currentTarget = { type: targetType, ref: bestTarget };
+            this.targetStartTime = millis(); // Reset timer for new target
           }
         }
 
@@ -220,7 +223,7 @@
           }
         }
 
-        // 20px window margin boundary check (allows roaming everywhere except the 20px outer edge)
+        // 20px window margin boundary check
         let margin = 20;
         if (nextHead.x < margin || nextHead.x > width - margin || nextHead.y < margin || nextHead.y > height - margin) {
           let angleToCenter = atan2(height / 2 - nextHead.y, width / 2 - nextHead.x);
