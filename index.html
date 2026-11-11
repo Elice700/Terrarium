@@ -28,8 +28,8 @@
 
   <script>
     let moldParticles = [];
-    let spatialGrid = {}; // Grid to enforce strict non-overlapping for green particles
-    let cellSize = 10;
+    let spatialGrid = {}; 
+    let cellSize = 8;
     let pinkFood = [];
     let heartParticles = [];
     let lizard;
@@ -107,34 +107,36 @@
       // 1. Layer 1: Full window light grey background
       background(235, 235, 235);
 
-      // 2. Layer 2: Mold Growth - Spawns adjacent to existing particles, weighted toward center
-      if (moldParticles.length < 5500 && frameCount % 1 === 0) {
-        // Pick an existing mold particle to branch from, biased toward those closer to the center
-        let parent = null;
+      // 2. Layer 2: Mold Growth - Active inward growth layer by layer (strands marching toward center)
+      if (moldParticles.length < 6000 && frameCount % 1 === 0) {
+        // Collect candidate frontier particles that are closest to the center
         let center = createVector(width / 2, height / 2);
+        let frontier = [];
         
-        // Try a few random picks and choose the one closer to center to create directional growth
-        for (let attempt = 0; attempt < 5; attempt++) {
-          let candidate = random(moldParticles);
-          if (candidate) {
-            if (!parent || dist(candidate.x, candidate.y, center.x, center.y) < dist(parent.x, parent.y, center.x, center.y)) {
-              parent = candidate;
-            }
+        // Sample random particles and pick those in the inner 50% of current mold radius
+        for (let i = 0; i < 15; i++) {
+          let p = random(moldParticles);
+          if (p) {
+            let d = dist(p.x, p.y, center.x, center.y);
+            frontier.push({ p: p, dist: d });
           }
         }
 
-        if (parent) {
-          // Angle pointing from parent towards center + slight variation
+        if (frontier.length > 0) {
+          // Sort by distance to center ascending so growth happens preferentially from the inner frontier inward
+          frontier.sort((a, b) => a.dist - b.dist);
+          let parent = frontier[0].p;
+
           let centerAngle = atan2(center.y - parent.y, center.x - parent.x);
-          let angle = centerAngle + random(-35, 35);
-          let stepDist = 5.5; // Adjacent spacing distance
+          let angle = centerAngle + random(-25, 25);
+          let stepDist = 5.0; // Tightly adjacent spacing
           let nx = parent.x + cos(angle) * stepDist;
           let ny = parent.y + sin(angle) * stepDist;
 
-          // Ensure within screen bounds and strictly non-overlapping
           let dCenter = dist(nx, ny, center.x, center.y);
-          if (nx > 15 && nx < width - 15 && ny > 15 && ny < height - 15 && dCenter < min(width, height) * 0.48) {
-            if (!checkOverlap(nx, ny, 3.8)) {
+          // Grow inward across screen, stopping before center
+          if (nx > 20 && nx < width - 20 && ny > 20 && ny < height - 20 && dCenter > 80 && dCenter < min(width, height) * 0.48) {
+            if (!checkOverlap(nx, ny, 3.5)) {
               let newP = new MoldParticle(nx, ny);
               moldParticles.push(newP);
               addSpatial(newP);
