@@ -80,7 +80,7 @@
           let ny = parent.y + sin(angle) * 4.5;
 
           let dCenter = dist(nx, ny, width / 2, height / 2);
-          if (dCenter > 120 && nx > 10 && nx < width - 10 && ny > 10 && ny < height - 10) {
+          if (dCenter > 60 && nx > 10 && nx < width - 10 && ny > 10 && ny < height - 10) {
             moldParticles.push(new MoldNode(nx, ny));
           }
         }
@@ -103,7 +103,7 @@
         circle(f.x, f.y, 10 + sin(frameCount * 10 + i) * 2);
       }
 
-      // 3. Update & Draw Layer 3: Orange Lizard with locked target persistence, smooth turning, and strict non-adjacent overlap prevention
+      // 3. Update & Draw Layer 3: Orange Lizard with locked target persistence and 20px window margin boundary
       lizard.update();
       lizard.display();
 
@@ -125,7 +125,7 @@
       }
     }
 
-    // Lizard Class with locked target persistence until eaten
+    // Lizard Class with locked target persistence and 20px window boundary
     class Lizard {
       constructor(x, y) {
         this.numSegments = 18;
@@ -133,7 +133,7 @@
         this.history = [];
         this.headAngle = 0;
         this.speed = 2.2;
-        this.currentTarget = null; // Locked target persistence
+        this.currentTarget = null;
 
         for (let i = 0; i < this.numSegments; i++) {
           this.history.push(createVector(x - i * this.segmentLen, y));
@@ -147,15 +147,12 @@
         let targetValid = false;
         if (this.currentTarget) {
           if (this.currentTarget.type === 'pink') {
-            // Check if this specific pink food vector still exists in pinkFood array
             targetValid = pinkFood.includes(this.currentTarget.ref);
           } else if (this.currentTarget.type === 'mold') {
-            // Check if this specific mold particle still exists in moldParticles array
             targetValid = moldParticles.includes(this.currentTarget.ref);
           }
         }
 
-        // If target was eaten or invalidated, clear it
         if (!targetValid) {
           this.currentTarget = null;
         }
@@ -174,16 +171,16 @@
             }
             this.currentTarget = { type: 'pink', ref: closestFood };
           } else {
-            // Pick closest inner mold particle
-            let center = createVector(width / 2, height / 2);
+            // Pick closest mold particle that is at least 20px away from edges
             let bestMold = null;
             let minDist = Infinity;
             for (let p of moldParticles) {
-              let distFromCenter = dist(p.x, p.y, center.x, center.y);
-              let distFromHead = dist(p.x, p.y, head.x, head.y);
-              if (distFromCenter < min(width, height) * 0.42 && distFromHead < minDist) {
-                minDist = distFromHead;
-                bestMold = p;
+              if (p.x > 20 && p.x < width - 20 && p.y > 20 && p.y < height - 20) {
+                let distFromHead = dist(p.x, p.y, head.x, head.y);
+                if (distFromHead < minDist) {
+                  minDist = distFromHead;
+                  bestMold = p;
+                }
               }
             }
             if (bestMold) {
@@ -192,23 +189,17 @@
           }
         }
 
-        // Determine destination coordinates from locked target or wander fallback
         let targetPos;
         if (this.currentTarget) {
-          if (this.currentTarget.type === 'pink') {
-            targetPos = createVector(this.currentTarget.ref.x, this.currentTarget.ref.y);
-          } else {
-            targetPos = createVector(this.currentTarget.ref.x, this.currentTarget.ref.y);
-          }
+          targetPos = createVector(this.currentTarget.ref.x, this.currentTarget.ref.y);
         } else {
-          // Wander fallback if terrarium is completely empty
           targetPos = createVector(
-            width / 2 + cos(frameCount * 1.0) * (width * 0.28),
-            height / 2 + sin(frameCount * 0.8) * (height * 0.28)
+            width / 2 + cos(frameCount * 1.0) * (width * 0.3),
+            height / 2 + sin(frameCount * 0.8) * (height * 0.3)
           );
         }
 
-        // Extremely smooth turning rate (very non-bendy)
+        // Smooth turning rate
         let desiredAngle = atan2(targetPos.y - head.y, targetPos.x - head.x);
         let angleDiff = (desiredAngle - this.headAngle + 540) % 360 - 180;
         this.headAngle += constrain(angleDiff, -1.0, 1.0);
@@ -230,12 +221,13 @@
           }
         }
 
-        // Full window freedom boundary
-        let distFromCenter = dist(nextHead.x, nextHead.y, width / 2, height / 2);
-        let maxLizardRadius = min(width, height) * 0.44;
-        if (distFromCenter > maxLizardRadius) {
+        // 20px window margin boundary check
+        let margin = 20;
+        if (nextHead.x < margin || nextHead.x > width - margin || nextHead.y < margin || nextHead.y > height - margin) {
           let angleToCenter = atan2(height / 2 - nextHead.y, width / 2 - nextHead.x);
           this.headAngle = angleToCenter;
+          nextHead.x = constrain(nextHead.x, margin, width - margin);
+          nextHead.y = constrain(nextHead.y, margin, height - margin);
         }
 
         // Update body chain with solid segments
