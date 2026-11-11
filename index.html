@@ -79,8 +79,7 @@
           let nx = parent.x + cos(angle) * 4.5;
           let ny = parent.y + sin(angle) * 4.5;
 
-          let dCenter = dist(nx, ny, width / 2, height / 2);
-          if (dCenter > 60 && nx > 10 && nx < width - 10 && ny > 10 && ny < height - 10) {
+          if (nx > 10 && nx < width - 10 && ny > 10 && ny < height - 10) {
             moldParticles.push(new MoldNode(nx, ny));
           }
         }
@@ -103,7 +102,7 @@
         circle(f.x, f.y, 10 + sin(frameCount * 10 + i) * 2);
       }
 
-      // 3. Update & Draw Layer 3: Orange Lizard with locked target persistence and 20px window margin boundary
+      // 3. Update & Draw Layer 3: Orange Lizard with full freedom except a 20px window edge margin
       lizard.update();
       lizard.display();
 
@@ -125,7 +124,7 @@
       }
     }
 
-    // Lizard Class with locked target persistence and 20px window boundary
+    // Lizard Class with locked target persistence and full screen freedom (except 20px margin)
     class Lizard {
       constructor(x, y) {
         this.numSegments = 18;
@@ -157,7 +156,7 @@
           this.currentTarget = null;
         }
 
-        // 2. If no locked target, select a new one (Pink food takes absolute priority)
+        // 2. If no locked target, select a new one (Pink food takes absolute priority; can target anywhere except very edge)
         if (!this.currentTarget) {
           if (pinkFood.length > 0) {
             let closestFood = pinkFood[0];
@@ -171,7 +170,7 @@
             }
             this.currentTarget = { type: 'pink', ref: closestFood };
           } else {
-            // Pick closest mold particle that is at least 20px away from edges
+            // Pick closest mold particle anywhere on screen (respecting 20px edge margin)
             let bestMold = null;
             let minDist = Infinity;
             for (let p of moldParticles) {
@@ -194,8 +193,8 @@
           targetPos = createVector(this.currentTarget.ref.x, this.currentTarget.ref.y);
         } else {
           targetPos = createVector(
-            width / 2 + cos(frameCount * 1.0) * (width * 0.3),
-            height / 2 + sin(frameCount * 0.8) * (height * 0.3)
+            width / 2 + cos(frameCount * 1.0) * (width * 0.35),
+            height / 2 + sin(frameCount * 0.8) * (height * 0.35)
           );
         }
 
@@ -221,7 +220,7 @@
           }
         }
 
-        // 20px window margin boundary check
+        // 20px window margin boundary check (allows roaming everywhere except the 20px outer edge)
         let margin = 20;
         if (nextHead.x < margin || nextHead.x > width - margin || nextHead.y < margin || nextHead.y > height - margin) {
           let angleToCenter = atan2(height / 2 - nextHead.y, width / 2 - nextHead.x);
